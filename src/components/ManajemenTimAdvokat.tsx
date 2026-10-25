@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   Advokat,
+  apakahAdvokatTerlibat,
   DAFTAR_JABATAN,
   ItemDisposisi,
   JabatanAdvokat,
@@ -304,9 +305,7 @@ export const ManajemenTimAdvokat: React.FC<ManajemenTimAdvokatProps> = ({
             </thead>
             <tbody className="divide-y divide-amber-100 text-xs">
               {advokatList.map((adv) => {
-                const beban = items.filter(
-                  (i) => i.advokatId === adv.id || i.advokatPendampingId === adv.id
-                ).length;
+                const beban = items.filter((i) => apakahAdvokatTerlibat(i, adv.id)).length;
                 const persentase = Math.min(100, Math.round((beban / adv.kuotaMingguan) * 100));
                 const sedangDiedit = editingId === adv.id;
 

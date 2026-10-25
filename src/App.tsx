@@ -2,11 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Advokat,
+  apakahAdvokatTerlibat,
   bangunMatriksLembarDisposisi,
   DAFTAR_JABATAN,
   evaluasiKonflikJadwal,
   formatRentangMinggu,
   formatTanggalIndonesia,
+  getPendampingList,
   HARI_URUTAN,
   hitungTanggalDariHari,
   INITIAL_ADVOKAT,
@@ -17,6 +19,7 @@ import {
   ModePengelompokanDisposisi,
   parseCatatanMentah,
   pilihAdvokatOtomatis,
+  resolveNamaPendamping,
   SAMPLE_CATATAN_MENTAH,
 } from './data/dispositionEngine';
 import { LembarDisposisiResmi } from './components/LembarDisposisiResmi';
@@ -355,9 +358,7 @@ export default function App() {
 
   const handleCopyWhatsApp = (advokatFilterId?: string) => {
     const targetItems = advokatFilterId
-      ? items.filter(
-          (i) => i.advokatId === advokatFilterId || i.advokatPendampingId === advokatFilterId
-        )
+      ? items.filter((i) => apakahAdvokatTerlibat(i, advokatFilterId))
       : items;
 
     const advTarget = advokatFilterId
@@ -380,11 +381,17 @@ export default function App() {
       lines.push(`\n*${hari.toUpperCase()}, ${formatTanggalIndonesia(hariItems[0].tanggalISO)}*`);
       hariItems.forEach((item, idx) => {
         const pic = advokatList.find((a) => a.id === item.advokatId);
+        const pendampingNames = getPendampingList(item).map((v) =>
+          resolveNamaPendamping(v, advokatList)
+        );
         lines.push(
           `${idx + 1}. *${item.waktuMulai}–${item.waktuSelesai} WIB* | *${item.lokasi}*`
         );
         lines.push(`   Perkara: ${item.perkara}${item.nomorPerkara !== '-' ? ` (${item.nomorPerkara})` : ''}`);
         lines.push(`   PIC: ${pic?.nama || '-'}${item.prioritas === 'Tinggi' ? ' [PRIORITAS TINGGI]' : ''}`);
+        if (pendampingNames.length > 0) {
+          lines.push(`   Pendamping: ${pendampingNames.join(', ')}`);
+        }
         lines.push(`   Disposisi: _${item.instruksiKhusus}_`);
       });
     });
@@ -970,9 +977,7 @@ export default function App() {
                   {advokatList
                     .filter((a) => a.aktif)
                     .map((adv) => {
-                      const count = items.filter(
-                        (i) => i.advokatId === adv.id || i.advokatPendampingId === adv.id
-                      ).length;
+                      const count = items.filter((i) => apakahAdvokatTerlibat(i, adv.id)).length;
                       return (
                         <div
                           key={adv.id}

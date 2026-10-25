@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import {
   Advokat,
+  apakahAdvokatTerlibat,
   formatTanggalIndonesia,
+  getPendampingList,
   HARI_URUTAN,
   HariKerja,
-   hitungTanggalDariHari,
+  hitungTanggalDariHari,
   ItemDisposisi,
   KategoriAgenda,
   KonflikJadwal,
@@ -18,7 +20,9 @@ import {
   Search,
   Trash2,
   UserCheck,
+  UserPlus,
   ArrowRightLeft,
+  X,
 } from 'lucide-react';
 
 interface TabelJadwalInteraktifProps {
@@ -59,11 +63,12 @@ export const TabelJadwalInteraktif: React.FC<TabelJadwalInteraktifProps> = ({
   const [hariBaru, setHariBaru] = useState<HariKerja>('Senin');
   const [mulaiBaru, setMulaiBaru] = useState<string>('09:00');
   const [selesaiBaru, setSelesaiBaru] = useState<string>('11:00');
-  const [lokasiBaru, setLokasiBaru] = useState<string>('PN Jakarta Selatan');
+  const [lokasiBaru, setLokasiBaru] = useState<string>('PN Palembang Kelas IA Khusus');
   const [kategoriBaru, setKategoriBaru] = useState<KategoriAgenda>('Sidang Pengadilan');
   const [perkaraBaru, setPerkaraBaru] = useState<string>('');
   const [noPerkaraBaru, setNoPerkaraBaru] = useState<string>('');
   const [advokatIdBaru, setAdvokatIdBaru] = useState<string>('auto');
+  const [pendampingIdsBaru, setPendampingIdsBaru] = useState<string[]>([]);
   const [prioritasBaru, setPrioritasBaru] = useState<TingkatPrioritas>('Normal');
   const [instruksiBaru, setInstruksiBaru] = useState<string>(
     'Siapkan berkas persidangan lengkap & laporkan hasil pelaksanaan.'
@@ -85,6 +90,8 @@ export const TabelJadwalInteraktif: React.FC<TabelJadwalInteraktifProps> = ({
           )
         : advokatIdBaru;
 
+    const cleanPendamping = pendampingIdsBaru.map((v) => v.trim()).filter(Boolean);
+
     const itemBaru: ItemDisposisi = {
       id: `disp-manual-${Date.now().toString(36)}`,
       hari: hariBaru,
@@ -96,6 +103,8 @@ export const TabelJadwalInteraktif: React.FC<TabelJadwalInteraktifProps> = ({
       perkara: perkaraBaru.trim(),
       nomorPerkara: noPerkaraBaru.trim() || '-',
       advokatId: chosenAdvId,
+      advokatPendampingId: cleanPendamping[0] || undefined,
+      advokatPendampingIds: cleanPendamping,
       prioritas: prioritasBaru,
       instruksiKhusus: instruksiBaru.trim() || 'Laksanakan sesuai SOP kantor.',
       statusKonfirmasi: 'Siap Jalan',
@@ -105,16 +114,13 @@ export const TabelJadwalInteraktif: React.FC<TabelJadwalInteraktifProps> = ({
     onAddItem(itemBaru);
     setPerkaraBaru('');
     setNoPerkaraBaru('');
+    setPendampingIdsBaru([]);
     setShowFormTambah(false);
   };
 
   const filtered = items.filter((item) => {
     if (filterHari !== 'Semua' && item.hari !== filterHari) return false;
-    if (
-      filterAdvokat !== 'Semua' &&
-      item.advokatId !== filterAdvokat &&
-      item.advokatPendampingId !== filterAdvokat
-    ) {
+    if (filterAdvokat !== 'Semua' && !apakahAdvokatTerlibat(item, filterAdvokat)) {
       return false;
     }
     if (kataKunci.trim() !== '') {
@@ -129,6 +135,15 @@ export const TabelJadwalInteraktif: React.FC<TabelJadwalInteraktifProps> = ({
   });
 
   const getAdvokat = (id: string) => advokatList.find((a) => a.id === id);
+
+  const updatePendampingItem = (item: ItemDisposisi, nextList: string[]) => {
+    const cleaned = nextList.filter((v) => v && v.trim() !== '');
+    onUpdateItem({
+      ...item,
+      advokatPendampingIds: cleaned,
+      advokatPendampingId: cleaned[0] || undefined,
+    });
+  };
 
   return (
     <div className="space-y-6">
@@ -351,7 +366,7 @@ export const TabelJadwalInteraktif: React.FC<TabelJadwalInteraktifProps> = ({
             </div>
             <div className="md:col-span-4">
               <label className="block text-xs font-medium text-slate-700 mb-1">
-                Advokat Penanggung Jawab (PIC)
+                Advokat Penanggung Jawab Utama (PIC)
               </label>
               <select
                 value={advokatIdBaru}
@@ -367,6 +382,74 @@ export const TabelJadwalInteraktif: React.FC<TabelJadwalInteraktifProps> = ({
                     </option>
                   ))}
               </select>
+            </div>
+
+            <div className="md:col-span-12 bg-amber-50/60 border border-amber-200 rounded-md p-3 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="text-xs font-semibold text-slate-800">
+                  Advokat Pendamping ({pendampingIdsBaru.length} Pendamping — Bisa Ditambahkan Tanpa Batasan)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const defaultAdv =
+                      advokatList.find(
+                        (a) => a.id !== advokatIdBaru && !pendampingIdsBaru.includes(a.id)
+                      ) || advokatList[0];
+                    if (defaultAdv) {
+                      setPendampingIdsBaru([...pendampingIdsBaru, defaultAdv.id]);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold text-slate-950 bg-yellow-400 border border-yellow-500 rounded hover:bg-yellow-500 transition-colors"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>+ Tambah Advokat Pendamping</span>
+                </button>
+              </div>
+
+              {pendampingIdsBaru.length === 0 ? (
+                <p className="text-xs text-slate-500">
+                  Belum ada advokat pendamping dipilih. Klik tombol <strong>+ Tambah Advokat Pendamping</strong> untuk menambahkan pendamping sebanyak yang dibutuhkan.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {pendampingIdsBaru.map((pId, idx) => (
+                    <div
+                      key={`form-pendamping-${idx}`}
+                      className="flex items-center gap-1.5 bg-white border border-amber-300 rounded px-2 py-1"
+                    >
+                      <span className="text-[11px] font-mono-tabular font-semibold text-amber-900 shrink-0">
+                        #{idx + 1}
+                      </span>
+                      <select
+                        value={pId}
+                        onChange={(e) => {
+                          const next = [...pendampingIdsBaru];
+                          next[idx] = e.target.value;
+                          setPendampingIdsBaru(next);
+                        }}
+                        className="flex-1 text-xs font-medium text-slate-900 bg-transparent focus:outline-none"
+                      >
+                        {advokatList.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.nama} ({a.jabatan})
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPendampingIdsBaru(pendampingIdsBaru.filter((_, i) => i !== idx))
+                        }
+                        title="Hapus pendamping ini"
+                        className="p-0.5 text-slate-400 hover:text-red-600 transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="md:col-span-8">
@@ -422,7 +505,7 @@ export const TabelJadwalInteraktif: React.FC<TabelJadwalInteraktifProps> = ({
                   <th className="py-3 px-4 w-36">Hari & Jam</th>
                   <th className="py-3 px-4 w-48">Lokasi Pengadilan</th>
                   <th className="py-3 px-4">Perkara & Nomor Register</th>
-                  <th className="py-3 px-4 w-56">Advokat Bertugas (PIC)</th>
+                  <th className="py-3 px-4 w-72">Advokat Bertugas (PIC)</th>
                   <th className="py-3 px-4 w-64">Instruksi Disposisi</th>
                   <th className="py-3 px-4 w-28 text-right">Tindakan</th>
                 </tr>
@@ -432,6 +515,7 @@ export const TabelJadwalInteraktif: React.FC<TabelJadwalInteraktifProps> = ({
                   const adaKonflik = konflikList.some(
                     (k) => k.itemId === item.id || k.rekanItemId === item.id
                   );
+                  const pendampingList = getPendampingList(item);
 
                   return (
                     <tr
@@ -528,10 +612,10 @@ export const TabelJadwalInteraktif: React.FC<TabelJadwalInteraktifProps> = ({
                         </div>
                       </td>
 
-                      {/* Kolom 4: Advokat PIC & Pendamping */}
-                      <td className="py-3.5 px-4 space-y-1.5">
+                      {/* Kolom 4: Advokat PIC & Advokat Pendamping (Tanpa Batasan) */}
+                      <td className="py-3.5 px-4 space-y-2">
                         <div>
-                          <label className="block text-[11px] font-medium text-slate-600 mb-0.5">
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
                             Advokat Utama (PIC):
                           </label>
                           <select
@@ -554,27 +638,118 @@ export const TabelJadwalInteraktif: React.FC<TabelJadwalInteraktifProps> = ({
                           </select>
                         </div>
 
-                        <div>
-                          <label className="block text-[11px] font-medium text-slate-600 mb-0.5">
-                            Advokat Pendamping:
-                          </label>
+                        {/* Daftar Advokat Pendamping (Tanpa Batasan) */}
+                        <div className="pt-1 border-t border-amber-100 space-y-1.5">
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="text-[11px] font-semibold text-slate-700">
+                              Advokat Pendamping ({pendampingList.length}):
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const kandidat =
+                                  advokatList.find(
+                                    (a) =>
+                                      a.id !== item.advokatId && !pendampingList.includes(a.id)
+                                  ) ||
+                                  advokatList.find((a) => a.id !== item.advokatId) ||
+                                  advokatList[0];
+                                if (kandidat) {
+                                  updatePendampingItem(item, [...pendampingList, kandidat.id]);
+                                }
+                              }}
+                              title="Tambahkan baris advokat pendamping baru (tanpa batasan jumlah)"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold text-slate-950 bg-yellow-400 border border-yellow-500 rounded hover:bg-yellow-500 transition-colors whitespace-nowrap"
+                            >
+                              <Plus className="w-3 h-3" />
+                              <span>Tambah Pendamping</span>
+                            </button>
+                          </div>
+
+                          {pendampingList.length > 0 && (
+                            <div className="space-y-1">
+                              {pendampingList.map((pendampingVal, idx) => {
+                                const matchedAdv = advokatList.find(
+                                  (a) =>
+                                    a.id === pendampingVal ||
+                                    a.nama.toLowerCase() === pendampingVal.toLowerCase()
+                                );
+                                return (
+                                  <div
+                                    key={`${item.id}-pendamping-${idx}`}
+                                    className="flex items-center gap-1"
+                                  >
+                                    <span className="text-[10px] font-mono-tabular font-bold text-amber-900 w-4 shrink-0">
+                                      {idx + 1}.
+                                    </span>
+                                    <select
+                                      value={matchedAdv ? matchedAdv.id : pendampingVal}
+                                      aria-label={`Advokat Pendamping ${idx + 1}`}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (!val) {
+                                          updatePendampingItem(
+                                            item,
+                                            pendampingList.filter((_, i) => i !== idx)
+                                          );
+                                        } else {
+                                          const next = [...pendampingList];
+                                          next[idx] = val;
+                                          updatePendampingItem(item, next);
+                                        }
+                                      }}
+                                      className="flex-1 min-w-0 text-slate-800 bg-white border border-amber-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                                    >
+                                      {!matchedAdv && (
+                                        <option value={pendampingVal}>{pendampingVal}</option>
+                                      )}
+                                      {advokatList.map((a) => (
+                                        <option key={a.id} value={a.id}>
+                                          {a.nama} ({a.jabatan})
+                                        </option>
+                                      ))}
+                                    </select>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        updatePendampingItem(
+                                          item,
+                                          pendampingList.filter((_, i) => i !== idx)
+                                        )
+                                      }
+                                      title="Hapus advokat pendamping ini"
+                                      className="p-1 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded transition-colors shrink-0"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {/* Dropdown Cepat untuk Langsung Memilih & Menambahkan Pendamping Baru */}
                           <select
-                            value={item.advokatPendampingId || ''}
-                            aria-label="Pilih Advokat Pendamping"
-                            onChange={(e) =>
-                              onUpdateItem({
-                                ...item,
-                                advokatPendampingId: e.target.value || undefined,
-                              })
-                            }
-                            className="w-full text-slate-800 bg-white border border-amber-200 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                            value=""
+                            aria-label="Tambah Advokat Pendamping Cepat"
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (val) {
+                                updatePendampingItem(item, [...pendampingList, val]);
+                              }
+                            }}
+                            className="w-full text-slate-700 bg-amber-50/40 border border-dashed border-amber-300 rounded-md px-2 py-1 text-[11px] focus:outline-none focus:ring-2 focus:ring-yellow-500"
                           >
-                            <option value="">-- Tanpa Pendamping --</option>
+                            <option value="">
+                              {pendampingList.length === 0
+                                ? '-- + Pilih Advokat Pendamping --'
+                                : '-- + Tambah Advokat Pendamping Lagi --'}
+                            </option>
                             {advokatList
                               .filter((a) => a.id !== item.advokatId)
                               .map((a) => (
                                 <option key={a.id} value={a.id}>
-                                  {a.nama} ({a.jabatan})
+                                  + {a.nama} ({a.jabatan})
                                 </option>
                               ))}
                           </select>

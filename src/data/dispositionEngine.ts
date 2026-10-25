@@ -42,10 +42,36 @@ export interface ItemDisposisi {
   nomorPerkara: string;
   advokatId: string;
   advokatPendampingId?: string;
+  advokatPendampingIds?: string[];
   prioritas: TingkatPrioritas;
   instruksiKhusus: string;
   statusKonfirmasi: 'Menunggu Konfirmasi' | 'Siap Jalan' | 'Selesai';
   assignedAutomatically?: boolean;
+}
+
+export function getPendampingList(item: ItemDisposisi): string[] {
+  if (Array.isArray(item.advokatPendampingIds)) {
+    return item.advokatPendampingIds.filter((v) => Boolean(v && v.trim()));
+  }
+  if (item.advokatPendampingId && item.advokatPendampingId.trim()) {
+    return [item.advokatPendampingId.trim()];
+  }
+  return [];
+}
+
+export function resolveNamaPendamping(val: string, advokatList: Advokat[]): string {
+  const found = advokatList.find((a) => a.id === val);
+  return found ? found.nama : val;
+}
+
+export function resolvePanggilanPendamping(val: string, advokatList: Advokat[]): string {
+  const found = advokatList.find((a) => a.id === val);
+  return found ? found.panggilan : val;
+}
+
+export function apakahAdvokatTerlibat(item: ItemDisposisi, advokatId: string): boolean {
+  if (item.advokatId === advokatId) return true;
+  return getPendampingList(item).includes(advokatId);
 }
 
 export interface MetadataDisposisi {
@@ -482,10 +508,12 @@ export function parseCatatanMentah(
 
     // Cari pendamping otomatis (Advokat) bila perkara Prioritas Tinggi di pengadilan
     let advokatPendampingId: string | undefined = undefined;
+    let advokatPendampingIds: string[] = [];
     if (prioritas === 'Tinggi' && kategori === 'Sidang Pengadilan') {
       const pendamping = advokatList.find((a) => a.aktif && a.jabatan === 'Advokat' && a.id !== advokatId);
       if (pendamping) {
         advokatPendampingId = pendamping.id;
+        advokatPendampingIds = [pendamping.id];
       }
     }
 
@@ -501,6 +529,7 @@ export function parseCatatanMentah(
       nomorPerkara,
       advokatId,
       advokatPendampingId,
+      advokatPendampingIds,
       prioritas,
       instruksiKhusus,
       statusKonfirmasi: 'Siap Jalan',
@@ -635,9 +664,7 @@ export function bangunMatriksLembarDisposisi(
   const filteredItems =
     filterAdvokatId === 'semua'
       ? items
-      : items.filter(
-          (i) => i.advokatId === filterAdvokatId || i.advokatPendampingId === filterAdvokatId
-        );
+      : items.filter((i) => apakahAdvokatTerlibat(i, filterAdvokatId));
 
   const modeLabel =
     modeKelompok === 'hari'
@@ -721,9 +748,9 @@ export function bangunMatriksLembarDisposisi(
 
       itemsHari.forEach((item) => {
         const pic = getAdvokat(item.advokatId);
-        const pendamping = item.advokatPendampingId
-          ? getAdvokat(item.advokatPendampingId)
-          : undefined;
+        const pendampingNames = getPendampingList(item).map((id) =>
+          resolveNamaPendamping(id, advokatList)
+        );
 
         const jamCell = `${item.waktuMulai} – ${item.waktuSelesai}${
           item.prioritas === 'Tinggi' ? ' [Prioritas Tinggi]' : ''
@@ -733,7 +760,7 @@ export function bangunMatriksLembarDisposisi(
           item.nomorPerkara !== '-' ? ` — No: ${item.nomorPerkara}` : ''
         }`;
         const advokatCell = `${pic?.nama || 'Belum Ditentukan'} (${pic?.jabatan || '-'}${
-          pendamping ? ` · Didampingi: ${pendamping.panggilan}` : ''
+          pendampingNames.length > 0 ? ` · Didampingi: ${pendampingNames.join(', ')}` : ''
         })`;
 
         rows.push([jamCell, lokasiCell, perkaraCell, advokatCell, item.instruksiKhusus]);
@@ -743,9 +770,7 @@ export function bangunMatriksLembarDisposisi(
     });
   } else if (modeKelompok === 'advokat') {
     advokatList.forEach((adv) => {
-      const itemsAdv = filteredItems.filter(
-        (i) => i.advokatId === adv.id || i.advokatPendampingId === adv.id
-      );
+      const itemsAdv = filteredItems.filter((i) => apakahAdvokatTerlibat(i, adv.id));
       if (itemsAdv.length === 0) return;
 
       rows.push([
@@ -764,7 +789,8 @@ export function bangunMatriksLembarDisposisi(
       ]);
 
       itemsAdv.forEach((item) => {
-        const sebagaiPendamping = item.advokatPendampingId === adv.id;
+        const sebagaiPendamping =
+          item.advokatId !== adv.id && getPendampingList(item).includes(adv.id);
         const hariCell = `${item.hari}, ${formatTanggalIndonesia(item.tanggalISO)}`;
         const jamCell = `${item.waktuMulai} – ${item.waktuSelesai}`;
         const lokasiCell = `${item.lokasi} (${item.kategori})`;
@@ -797,13 +823,18 @@ export function bangunMatriksLembarDisposisi(
 
       itemsLokasi.forEach((item) => {
         const pic = getAdvokat(item.advokatId);
+        const pendampingNames = getPendampingList(item).map((id) =>
+          resolveNamaPendamping(id, advokatList)
+        );
         const hariJamCell = `${item.hari}, ${formatTanggalIndonesia(item.tanggalISO)} (${
           item.waktuMulai
         } – ${item.waktuSelesai} WIB)`;
         const perkaraCell = `${item.perkara} (${item.kategori}${
           item.nomorPerkara !== '-' ? ` · No: ${item.nomorPerkara}` : ''
         })`;
-        const picCell = `${pic?.nama || '-'} (${pic?.telepon || '-'})`;
+        const picCell = `${pic?.nama || '-'} (${pic?.telepon || '-'})${
+          pendampingNames.length > 0 ? ` · Didampingi: ${pendampingNames.join(', ')}` : ''
+        }`;
 
         rows.push([hariJamCell, perkaraCell, picCell, item.instruksiKhusus, '']);
       });
@@ -846,9 +877,7 @@ export function bangunMatriksLembarDisposisi(
   const totalBarisBawah = Math.max(advokatAktif.length, kananPengesahan.length);
   for (let idx = 0; idx < totalBarisBawah; idx++) {
     const adv = advokatAktif[idx];
-    const count = adv
-      ? items.filter((i) => i.advokatId === adv.id || i.advokatPendampingId === adv.id).length
-      : 0;
+    const count = adv ? items.filter((i) => apakahAdvokatTerlibat(i, adv.id)).length : 0;
     const teksKanan = kananPengesahan[idx] || '';
 
     rows.push([

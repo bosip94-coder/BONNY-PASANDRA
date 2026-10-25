@@ -3,12 +3,15 @@ import { toCanvas } from 'html-to-image';
 import { jsPDF } from 'jspdf';
 import {
   Advokat,
+  apakahAdvokatTerlibat,
   formatRentangMinggu,
   formatTanggalIndonesia,
+  getPendampingList,
   HARI_URUTAN,
   ItemDisposisi,
   MetadataDisposisi,
   ModePengelompokanDisposisi,
+  resolveNamaPendamping,
 } from '../data/dispositionEngine';
 import {
   Printer,
@@ -61,9 +64,7 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
   const filteredItems =
     filterAdvokatId === 'semua'
       ? items
-      : items.filter(
-          (i) => i.advokatId === filterAdvokatId || i.advokatPendampingId === filterAdvokatId
-        );
+      : items.filter((i) => apakahAdvokatTerlibat(i, filterAdvokatId));
 
   const unikLokasi: string[] = Array.from(new Set(filteredItems.map((i) => i.lokasi)));
 
@@ -196,9 +197,7 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
             >
               <option value="semua">Seluruh Tim Advokat ({items.length} Agenda)</option>
               {advokatList.map((adv) => {
-                const count = items.filter(
-                  (i) => i.advokatId === adv.id || i.advokatPendampingId === adv.id
-                ).length;
+                const count = items.filter((i) => apakahAdvokatTerlibat(i, adv.id)).length;
                 return (
                   <option key={adv.id} value={adv.id}>
                     {adv.nama} ({count} Agenda)
@@ -485,9 +484,9 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
                         <tbody className="divide-y divide-slate-200 text-xs">
                           {itemsHari.map((item) => {
                             const pic = getAdvokat(item.advokatId);
-                            const pendamping = item.advokatPendampingId
-                              ? getAdvokat(item.advokatPendampingId)
-                              : undefined;
+                            const pendampingNames = getPendampingList(item).map((v) =>
+                              resolveNamaPendamping(v, advokatList)
+                            );
                             return (
                               <tr key={item.id} className="align-top">
                                 <td className="py-3 pr-3 font-mono-tabular font-semibold text-slate-900 whitespace-nowrap">
@@ -517,10 +516,19 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
                                   <div className="font-semibold text-slate-900">
                                     {pic?.nama || 'Belum Ditentukan'}
                                   </div>
-                                  <div className="text-slate-500 mt-0.5">
-                                    {pic?.jabatan}
-                                    {pendamping ? ` · Didampingi: ${pendamping.panggilan}` : ''}
-                                  </div>
+                                  <div className="text-slate-500 mt-0.5">{pic?.jabatan}</div>
+                                  {pendampingNames.length > 0 && (
+                                    <div className="text-amber-950 font-medium mt-1 space-y-0.5">
+                                      <div className="text-[11px] font-semibold text-amber-900">
+                                        Pendamping ({pendampingNames.length}):
+                                      </div>
+                                      {pendampingNames.map((namaP, idxP) => (
+                                        <div key={idxP} className="text-[11px] text-slate-700">
+                                          {idxP + 1}. {namaP}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
                                 </td>
                                 <td className="py-3 pl-3 text-slate-700 leading-relaxed">
                                   {item.instruksiKhusus}
@@ -538,9 +546,7 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
             {/* MODE 2: KELOMPOK PER ADVOKAT */}
             {modeKelompok === 'advokat' &&
               advokatList.map((adv) => {
-                const itemsAdv = filteredItems.filter(
-                  (i) => i.advokatId === adv.id || i.advokatPendampingId === adv.id
-                );
+                const itemsAdv = filteredItems.filter((i) => apakahAdvokatTerlibat(i, adv.id));
                 if (itemsAdv.length === 0) return null;
 
                 return (
@@ -570,7 +576,10 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
                         </thead>
                         <tbody className="divide-y divide-slate-200 text-xs">
                           {itemsAdv.map((item) => {
-                            const sebagaiPendamping = item.advokatPendampingId === adv.id;
+                            const sebagaiPendamping = item.advokatId !== adv.id;
+                            const pendampingNames = getPendampingList(item).map((v) =>
+                              resolveNamaPendamping(v, advokatList)
+                            );
                             return (
                               <tr key={item.id} className="align-top">
                                 <td className="py-3 pr-3 font-semibold text-slate-900 whitespace-nowrap">
@@ -592,7 +601,11 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
                                     Peran:{' '}
                                     {sebagaiPendamping
                                       ? `Advokat Pendamping (PIC: ${getAdvokat(item.advokatId)?.nama})`
-                                      : 'Advokat Penanggung Jawab Utama (PIC)'}
+                                      : `Advokat Penanggung Jawab Utama (PIC)${
+                                          pendampingNames.length > 0
+                                            ? ` · Didampingi: ${pendampingNames.join(', ')}`
+                                            : ''
+                                        }`}
                                     {item.nomorPerkara !== '-' ? ` · No: ${item.nomorPerkara}` : ''}
                                   </div>
                                 </td>
@@ -637,6 +650,9 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
                         <tbody className="divide-y divide-slate-200 text-xs">
                           {itemsLokasi.map((item) => {
                             const pic = getAdvokat(item.advokatId);
+                            const pendampingNames = getPendampingList(item).map((v) =>
+                              resolveNamaPendamping(v, advokatList)
+                            );
                             return (
                               <tr key={item.id} className="align-top">
                                 <td className="py-3 pr-3 whitespace-nowrap">
@@ -657,6 +673,14 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
                                 <td className="py-3 px-3">
                                   <div className="font-semibold text-slate-900">{pic?.nama}</div>
                                   <div className="text-slate-500 mt-0.5">{pic?.telepon}</div>
+                                  {pendampingNames.length > 0 && (
+                                    <div className="text-slate-700 mt-1 text-[11px]">
+                                      <span className="font-semibold text-amber-900">
+                                        Pendamping ({pendampingNames.length}):
+                                      </span>{' '}
+                                      {pendampingNames.join(', ')}
+                                    </div>
+                                  )}
                                 </td>
                                 <td className="py-3 pl-3 text-slate-700 leading-relaxed">
                                   {item.instruksiKhusus}
@@ -702,9 +726,7 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
                   {advokatList
                     .filter((a) => a.aktif)
                     .map((adv) => {
-                      const count = items.filter(
-                        (i) => i.advokatId === adv.id || i.advokatPendampingId === adv.id
-                      ).length;
+                      const count = items.filter((i) => apakahAdvokatTerlibat(i, adv.id)).length;
                       return (
                         <tr key={adv.id}>
                           <td className="py-2 px-2.5 border-r border-slate-300 font-medium text-slate-900">
