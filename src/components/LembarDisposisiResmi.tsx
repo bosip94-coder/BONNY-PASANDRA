@@ -142,16 +142,16 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Control Toolbar (Hidden when printing) */}
-      <div className="no-print bg-white border border-amber-200 rounded-lg p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-3">
+      <div className="no-print bg-white border border-amber-200 rounded-lg p-3.5 sm:p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3.5 sm:gap-4">
+        <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">
           <span className="text-xs font-semibold text-amber-900">Pengelompokan Lembar:</span>
-          <div className="flex items-center gap-1 p-1 bg-amber-100/80 border border-amber-200 rounded-lg">
+          <div className="w-full sm:w-auto flex items-center gap-1 p-1 bg-amber-100/80 border border-amber-200 rounded-lg overflow-x-auto">
             <button
               type="button"
               onClick={() => onChangeModeKelompok('hari')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
+              className={`px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 modeKelompok === 'hari'
                   ? 'bg-yellow-400 text-slate-950 shadow-2xs'
                   : 'text-slate-700 hover:text-slate-950'
@@ -162,7 +162,7 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
             <button
               type="button"
               onClick={() => onChangeModeKelompok('advokat')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
+              className={`px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 modeKelompok === 'advokat'
                   ? 'bg-yellow-400 text-slate-950 shadow-2xs'
                   : 'text-slate-700 hover:text-slate-950'
@@ -173,7 +173,7 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
             <button
               type="button"
               onClick={() => onChangeModeKelompok('lokasi')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
+              className={`px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 modeKelompok === 'lokasi'
                   ? 'bg-yellow-400 text-slate-950 shadow-2xs'
                   : 'text-slate-700 hover:text-slate-950'
@@ -185,7 +185,7 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
 
           <div className="h-4 w-px bg-amber-200 hidden sm:block" />
 
-          <div className="flex items-center gap-2">
+          <div className="w-full sm:w-auto flex items-center gap-2">
             <label htmlFor="filter-advokat-disposisi" className="text-xs font-semibold text-slate-700 whitespace-nowrap">
               Tampilan Advokat:
             </label>
@@ -193,7 +193,7 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
               id="filter-advokat-disposisi"
               value={filterAdvokatId}
               onChange={(e) => onChangeFilterAdvokatId(e.target.value)}
-              className="text-xs font-semibold bg-amber-50 border border-amber-300 rounded-md px-2.5 py-1.5 text-slate-950 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+              className="flex-1 sm:flex-initial min-w-0 text-xs font-semibold bg-amber-50 border border-amber-300 rounded-md px-2.5 py-1.5 text-slate-950 focus:outline-none focus:ring-2 focus:ring-yellow-500"
             >
               <option value="semua">Seluruh Tim Advokat ({items.length} Agenda)</option>
               {advokatList.map((adv) => {
@@ -371,12 +371,12 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
       {/* Official Printable Disposition Sheet */}
       <div
         ref={sheetRef}
-        className="print-sheet bg-white border border-amber-300 rounded-lg p-8 md:p-12 max-w-5xl mx-auto text-slate-900"
+        className="print-sheet bg-white border border-amber-300 rounded-lg p-4 sm:p-8 md:p-12 max-w-5xl mx-auto text-slate-900"
       >
         {/* Kop Surat Resmi (Official Law Firm Letterhead) */}
-        <div className="border-b-2 border-yellow-500 pb-6 mb-6 flex flex-col sm:flex-row print:flex-row sm:items-center print:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="w-20 h-20 rounded-lg bg-amber-50/60 border border-amber-200 flex items-center justify-center shrink-0 p-1">
+        <div className="border-b-2 border-yellow-500 pb-4 sm:pb-6 mb-5 sm:mb-6 flex flex-col sm:flex-row print:flex-row sm:items-center print:items-center justify-between gap-4">
+          <div className="flex items-start sm:items-center gap-3 sm:gap-4">
+            <div className="w-14 h-14 sm:w-20 sm:h-20 rounded-lg bg-amber-50/60 border border-amber-200 flex items-center justify-center shrink-0 p-1">
               <img
                 src="/assets/aistudio/logo_rg_f_775b191a.png"
                 alt="Logo Resmi Ryan Gumay Law Firm"
@@ -385,19 +385,19 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
               />
             </div>
             <div>
-              <h1 className="font-display text-2xl sm:text-3xl font-bold tracking-tight text-slate-950">
+              <h1 className="font-display text-lg sm:text-3xl font-bold tracking-tight text-slate-950">
                 RYAN GUMAY LAW FIRM
               </h1>
               <p className="text-xs font-semibold text-amber-800 mt-0.5">
                 Advocates, Litigators & Corporate Legal Consultants
               </p>
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-[11px] sm:text-xs text-slate-500 mt-1">
                 Jalan Proklamasi Blok J Nomor 9 RT 032 RW 009 Kelurahan Lorok Pakjo Kecamatan Ilir Barat 1 Kota Palembang Sumatera Selatan
               </p>
             </div>
           </div>
 
-          <div className="sm:text-right print:text-right font-mono-tabular text-xs space-y-1 text-slate-700 shrink-0">
+          <div className="sm:text-right print:text-right font-mono-tabular text-xs space-y-1 text-slate-700 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-amber-100">
             <div>
               <span className="text-slate-500">No. Disposisi: </span>
               <span className="font-semibold text-slate-900">{metadata.nomorDokumen}</span>
@@ -416,9 +416,9 @@ export const LembarDisposisiResmi: React.FC<LembarDisposisiResmiProps> = ({
         </div>
 
         {/* Document Title Banner */}
-        <div className="mb-6 flex flex-col sm:flex-row print:flex-row sm:items-baseline print:items-baseline justify-between gap-2 pb-4 border-b border-slate-200">
+        <div className="mb-5 sm:mb-6 flex flex-col sm:flex-row print:flex-row sm:items-baseline print:items-baseline justify-between gap-2 pb-4 border-b border-slate-200">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">
+            <h2 className="text-base sm:text-lg font-bold text-slate-900">
               LEMBAR DISPOSISI PENUGASAN TIM ADVOKAT MINGGUAN
             </h2>
             <p className="text-xs text-slate-600 mt-0.5">

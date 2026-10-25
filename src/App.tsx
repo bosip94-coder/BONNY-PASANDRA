@@ -76,8 +76,24 @@ function normalisasiJabatan(jabatanLama: string): JabatanAdvokat {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<TabAktif>('konverter');
+  const [activeTab, setActiveTab] = useState<TabAktif>('lembar');
   const [cloudReady, setCloudReady] = useState<boolean>(false);
+
+  // Pastikan saat dibuka atau beralih ke tampilan mobile (< 768px), langsung tampil di halaman Lembar Disposisi
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.innerWidth < 768) {
+      setActiveTab('lembar');
+    }
+    const mql = window.matchMedia('(max-width: 767px)');
+    const handleViewportChange = (e: MediaQueryListEvent) => {
+      if (e.matches) {
+        setActiveTab('lembar');
+      }
+    };
+    mql.addEventListener('change', handleViewportChange);
+    return () => mql.removeEventListener('change', handleViewportChange);
+  }, []);
 
   const [advokatList, setAdvokatList] = useState<Advokat[]>(INITIAL_ADVOKAT);
   const [metadata, setMetadata] = useState<MetadataDisposisi>(INITIAL_METADATA);
@@ -579,34 +595,34 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-amber-50/40 text-slate-900">
-      {/* Top Bar Contract: Strictly 3 zones separated by gap-8 */}
-      <header className="no-print sticky top-0 z-30 bg-white border-b-2 border-yellow-400 px-6 py-3.5 flex items-center justify-between gap-8 shadow-2xs">
+      {/* Top Bar Contract: Responsive on mobile while preserving 3 zones */}
+      <header className="no-print sticky top-0 z-30 bg-white border-b-2 border-yellow-400 px-3.5 sm:px-6 py-2.5 sm:py-3.5 flex flex-wrap md:flex-nowrap items-center justify-between gap-y-2.5 gap-x-3 md:gap-8 shadow-2xs">
         {/* Zone 1: Brand with official Ryan Gumay Law Firm logo */}
         <a
           href="#top"
           onClick={(e) => {
             e.preventDefault();
-            setActiveTab('konverter');
+            setActiveTab('lembar');
           }}
-          className="flex items-center gap-3 font-display text-xl font-bold tracking-tight text-slate-950 whitespace-nowrap shrink-0"
+          className="order-1 flex items-center gap-2 sm:gap-3 font-display text-base sm:text-xl font-bold tracking-tight text-slate-950 whitespace-nowrap shrink-0"
         >
           <img
             src="/assets/aistudio/logo_rg_f_775b191a.png"
             alt="Logo Ryan Gumay Law Firm"
             referrerPolicy="no-referrer"
-            className="w-10 h-10 object-contain shrink-0"
+            className="w-8 h-8 sm:w-10 sm:h-10 object-contain shrink-0"
           />
           <span>Ryan Gumay Law Firm</span>
         </a>
 
         {/* Zone 2: 4 concise single-line navigation links */}
-        <nav className="flex items-center gap-6 text-sm font-medium text-slate-600 overflow-x-auto">
+        <nav className="order-3 md:order-2 w-full md:w-auto flex items-center justify-between sm:justify-start gap-1 sm:gap-6 text-xs sm:text-sm font-medium text-slate-600 overflow-x-auto pt-2 md:pt-0 border-t md:border-t-0 border-amber-100">
           <button
             type="button"
             onClick={() => setActiveTab('konverter')}
-            className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+            className={`px-2 py-1.5 md:px-0 md:py-1 rounded-md md:rounded-none border-b-2 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'konverter'
-                ? 'border-yellow-500 text-slate-950 font-bold'
+                ? 'bg-yellow-400/25 md:bg-transparent border-yellow-500 text-slate-950 font-bold'
                 : 'border-transparent hover:text-slate-950'
             }`}
           >
@@ -615,9 +631,9 @@ export default function App() {
           <button
             type="button"
             onClick={() => setActiveTab('jadwal')}
-            className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+            className={`px-2 py-1.5 md:px-0 md:py-1 rounded-md md:rounded-none border-b-2 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'jadwal'
-                ? 'border-yellow-500 text-slate-950 font-bold'
+                ? 'bg-yellow-400/25 md:bg-transparent border-yellow-500 text-slate-950 font-bold'
                 : 'border-transparent hover:text-slate-950'
             }`}
           >
@@ -626,9 +642,9 @@ export default function App() {
           <button
             type="button"
             onClick={() => setActiveTab('lembar')}
-            className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+            className={`px-2 py-1.5 md:px-0 md:py-1 rounded-md md:rounded-none border-b-2 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'lembar'
-                ? 'border-yellow-500 text-slate-950 font-bold'
+                ? 'bg-yellow-400/25 md:bg-transparent border-yellow-500 text-slate-950 font-bold'
                 : 'border-transparent hover:text-slate-950'
             }`}
           >
@@ -637,9 +653,9 @@ export default function App() {
           <button
             type="button"
             onClick={() => setActiveTab('advokat')}
-            className={`py-1 border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+            className={`px-2 py-1.5 md:px-0 md:py-1 rounded-md md:rounded-none border-b-2 transition-colors whitespace-nowrap shrink-0 ${
               activeTab === 'advokat'
-                ? 'border-yellow-500 text-slate-950 font-bold'
+                ? 'bg-yellow-400/25 md:bg-transparent border-yellow-500 text-slate-950 font-bold'
                 : 'border-transparent hover:text-slate-950'
             }`}
           >
@@ -648,24 +664,29 @@ export default function App() {
         </nav>
 
         {/* Zone 3: 1 primary action button */}
-        <div className="flex items-center shrink-0">
+        <div className="order-2 md:order-3 flex items-center shrink-0">
           <button
             type="button"
             onClick={handlePrintLangsung}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-slate-950 bg-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 text-xs font-bold text-slate-950 bg-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 transition-colors whitespace-nowrap shrink-0"
           >
             <Printer className="w-3.5 h-3.5" />
-            <span>Cetak Lembar Disposisi</span>
+            <span className="hidden sm:inline">Cetak Lembar Disposisi</span>
+            <span className="sm:hidden">Cetak</span>
           </button>
         </div>
       </header>
 
-      {/* Workspace Context & Summary Strip (Hidden on Print) */}
-      <section className="no-print bg-gradient-to-b from-amber-50/90 to-white border-b border-amber-200 px-6 py-5">
-        <div className="max-w-7xl mx-auto space-y-5">
-          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+      {/* Workspace Context & Summary Strip (Hidden on Print, Compact on Mobile when on Lembar Disposisi) */}
+      <section
+        className={`no-print bg-gradient-to-b from-amber-50/90 to-white border-b border-amber-200 px-3.5 sm:px-6 py-3 sm:py-5 ${
+          activeTab === 'lembar' ? 'hidden md:block' : ''
+        }`}
+      >
+        <div className="max-w-7xl mx-auto space-y-4 sm:space-y-5">
+          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3 sm:gap-4">
             <div>
-              <div className="flex flex-wrap items-center gap-2 text-xs text-amber-900 font-semibold">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs text-amber-900 font-semibold">
                 <span>Sistem Internal Kepala Kantor</span>
                 <span aria-hidden="true">·</span>
                 <span>
@@ -674,13 +695,13 @@ export default function App() {
                 <span aria-hidden="true">·</span>
                 <span className="font-mono-tabular">No. {metadata.nomorDokumen}</span>
               </div>
-              <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-950 mt-1">
+              <h1 className="text-lg sm:text-2xl md:text-3xl font-bold tracking-tight text-slate-950 mt-1">
                 Konverter Daftar Agenda Cepat ke Lembar Disposisi Mingguan
               </h1>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2.5">
-              <div className="flex items-center gap-2 bg-amber-50 border border-amber-300 rounded-lg px-3 py-1.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 bg-amber-50 border border-amber-300 rounded-lg px-2.5 sm:px-3 py-1.5">
                 <label
                   htmlFor="global-week-picker"
                   className="text-xs font-medium text-amber-950 whitespace-nowrap"
@@ -704,7 +725,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => handleCopyWhatsApp()}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-900 bg-white border border-amber-300 rounded-lg hover:bg-amber-50 transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold text-slate-900 bg-white border border-amber-300 rounded-lg hover:bg-amber-50 transition-colors whitespace-nowrap shrink-0"
               >
                 {copiedKey === 'wa-all' ? (
                   <>
@@ -722,7 +743,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleExportCSV}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-900 bg-white border border-amber-300 rounded-lg hover:bg-amber-50 transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold text-slate-900 bg-white border border-amber-300 rounded-lg hover:bg-amber-50 transition-colors whitespace-nowrap shrink-0"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-amber-700" />
                 <span>Ekspor CSV</span>
@@ -779,7 +800,7 @@ export default function App() {
       )}
 
       {/* Main Content Area */}
-      <main className="print-container flex-1 max-w-7xl w-full mx-auto px-6 py-6 space-y-6">
+      <main className="print-container flex-1 max-w-7xl w-full mx-auto px-3.5 sm:px-6 py-4 sm:py-6 space-y-5 sm:space-y-6">
         {/* Panel Impor CSV & Google Spreadsheet (Tampil di Tab Konverter & Tabel Jadwal) */}
         {(activeTab === 'konverter' || activeTab === 'jadwal') && (
           <div className="no-print">
