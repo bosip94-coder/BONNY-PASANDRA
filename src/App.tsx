@@ -696,7 +696,7 @@ export default function App() {
                 <span className="font-mono-tabular">No. {metadata.nomorDokumen}</span>
               </div>
               <h1 className="text-lg sm:text-2xl md:text-3xl font-bold tracking-tight text-slate-950 mt-1">
-                Konverter Daftar Agenda Cepat ke Lembar Disposisi Mingguan
+                SIAP RG (Sistem Internal Agenda & Penugasan Advokat Ryan Gumay)
               </h1>
             </div>
 
