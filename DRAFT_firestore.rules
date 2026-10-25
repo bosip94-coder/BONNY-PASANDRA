@@ -7,21 +7,6 @@ service cloud.firestore {
     }
 
     // 2. Hardened Global Helpers
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isVerifiedUser() {
-      return isSignedIn() && request.auth.token.email_verified == true;
-    }
-
-    function isAdmin() {
-      return isVerifiedUser() && (
-        request.auth.token.email == 'bosip94@gmail.com' ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
-    }
-
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -84,7 +69,6 @@ service cloud.firestore {
         data.catatanUmum is string && data.catatanUmum.size() >= 1 && data.catatanUmum.size() <= 2000 &&
         data.catatanMentah is string && data.catatanMentah.size() <= 20000 &&
         data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128 &&
-        data.authorUid == request.auth.uid &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -136,7 +120,6 @@ service cloud.firestore {
         data.kontakWa is string && data.kontakWa.size() >= 1 && data.kontakWa.size() <= 60 &&
         data.aktif is bool &&
         data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128 &&
-        data.authorUid == request.auth.uid &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
@@ -215,164 +198,148 @@ service cloud.firestore {
         (data.statusKonfirmasi == 'Siap Jalan' || data.statusKonfirmasi == 'Perlu Koordinasi') &&
         data.assignedAutomatically is bool &&
         data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128 &&
-        data.authorUid == request.auth.uid &&
         data.createdAt is timestamp &&
         data.updatedAt is timestamp;
     }
 
-    // 4. Admins Collection
-    match /admins/{adminUid} {
-      allow get: if isVerifiedUser() && isValidId(adminUid) && request.auth.uid == adminUid;
-      allow list, create, update, delete: if false;
-    }
-
-    // 5. Workspaces Collection
+    // 4. Workspaces Collection (Direct Shared Access without Google Login Gate)
     match /workspaces/{workspaceId} {
-      allow get: if isVerifiedUser() &&
-        isValidId(workspaceId) &&
+      allow get: if isValidId(workspaceId) &&
         workspaceId == 'rglf-main' &&
         (resource == null || existing().visibility == 'firm_internal');
       allow list: if false;
 
-      allow create: if isVerifiedUser() &&
-        isValidId(workspaceId) &&
+      allow create: if isValidId(workspaceId) &&
         workspaceId == 'rglf-main' &&
         isValidWorkspace(incoming(), workspaceId) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time;
 
-      allow update: if isVerifiedUser() &&
-        isValidId(workspaceId) &&
+      allow update: if isValidId(workspaceId) &&
         workspaceId == 'rglf-main' &&
         isValidWorkspace(incoming(), workspaceId) &&
         incoming().workspaceId == existing().workspaceId &&
         incoming().visibility == existing().visibility &&
         incoming().createdAt == existing().createdAt &&
-        incoming().updatedAt == request.time && (
-          isAdmin() ||
-          incoming().diff(existing()).affectedKeys().hasOnly([
-            'nomorDokumen',
-            'tanggalMulaiMinggu',
-            'kepalaKantor',
-            'jabatanKepala',
-            'kotaKantor',
-            'catatanUmum',
-            'catatanMentah',
-            'authorUid',
-            'updatedAt'
-          ])
-        );
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'nomorDokumen',
+          'tanggalMulaiMinggu',
+          'kepalaKantor',
+          'jabatanKepala',
+          'kotaKantor',
+          'catatanUmum',
+          'catatanMentah',
+          'authorUid',
+          'updatedAt'
+        ]);
 
       allow delete: if false;
 
-      // 6. Advokat Subcollection
+      // 5. Advokat Subcollection
       match /advokat/{advokatId} {
-        allow get: if isVerifiedUser() &&
-          isValidId(workspaceId) &&
+        allow get: if isValidId(workspaceId) &&
           isValidId(advokatId) &&
+          workspaceId == 'rglf-main' &&
           (resource == null || (existing().workspaceId == workspaceId && existing().visibility == 'firm_internal')) &&
           isWorkspaceActive(workspaceId);
 
-        allow list: if isVerifiedUser() &&
-          isValidId(workspaceId) &&
+        allow list: if isValidId(workspaceId) &&
+          workspaceId == 'rglf-main' &&
           existing().workspaceId == workspaceId &&
           existing().visibility == 'firm_internal';
 
-        allow create: if isVerifiedUser() &&
-          isValidId(workspaceId) &&
+        allow create: if isValidId(workspaceId) &&
           isValidId(advokatId) &&
+          workspaceId == 'rglf-main' &&
           isValidAdvokat(incoming(), workspaceId, advokatId) &&
           incoming().createdAt == request.time &&
           incoming().updatedAt == request.time &&
           isWorkspaceActive(workspaceId);
 
-        allow update: if isVerifiedUser() &&
-          isValidId(workspaceId) &&
+        allow update: if isValidId(workspaceId) &&
           isValidId(advokatId) &&
+          workspaceId == 'rglf-main' &&
           isValidAdvokat(incoming(), workspaceId, advokatId) &&
           incoming().id == existing().id &&
           incoming().workspaceId == existing().workspaceId &&
           incoming().visibility == existing().visibility &&
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
-          isWorkspaceActive(workspaceId) && (
-            isAdmin() ||
-            incoming().diff(existing()).affectedKeys().hasOnly([
-              'nama',
-              'panggilan',
-              'jabatan',
-              'spesialisasi',
-              'kuotaMingguan',
-              'nomorInduk',
-              'kontakWa',
-              'aktif',
-              'authorUid',
-              'updatedAt'
-            ])
-          );
+          isWorkspaceActive(workspaceId) &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'nama',
+            'panggilan',
+            'jabatan',
+            'spesialisasi',
+            'kuotaMingguan',
+            'nomorInduk',
+            'kontakWa',
+            'aktif',
+            'authorUid',
+            'updatedAt'
+          ]);
 
-        allow delete: if isVerifiedUser() &&
-          isValidId(workspaceId) &&
+        allow delete: if isValidId(workspaceId) &&
           isValidId(advokatId) &&
+          workspaceId == 'rglf-main' &&
           existing().workspaceId == workspaceId &&
           isWorkspaceActive(workspaceId);
       }
 
-      // 7. Disposisi Subcollection
+      // 6. Disposisi Subcollection
       match /disposisi/{itemId} {
-        allow get: if isVerifiedUser() &&
-          isValidId(workspaceId) &&
+        allow get: if isValidId(workspaceId) &&
           isValidId(itemId) &&
+          workspaceId == 'rglf-main' &&
           (resource == null || (existing().workspaceId == workspaceId && existing().visibility == 'firm_internal')) &&
           isWorkspaceActive(workspaceId);
 
-        allow list: if isVerifiedUser() &&
-          isValidId(workspaceId) &&
+        allow list: if isValidId(workspaceId) &&
+          workspaceId == 'rglf-main' &&
           existing().workspaceId == workspaceId &&
           existing().visibility == 'firm_internal';
 
-        allow create: if isVerifiedUser() &&
-          isValidId(workspaceId) &&
+        allow create: if isValidId(workspaceId) &&
           isValidId(itemId) &&
+          workspaceId == 'rglf-main' &&
           isValidDisposisiItem(incoming(), workspaceId, itemId) &&
           incoming().createdAt == request.time &&
           incoming().updatedAt == request.time &&
           isWorkspaceActive(workspaceId);
 
-        allow update: if isVerifiedUser() &&
-          isValidId(workspaceId) &&
+        allow update: if isValidId(workspaceId) &&
           isValidId(itemId) &&
+          workspaceId == 'rglf-main' &&
           isValidDisposisiItem(incoming(), workspaceId, itemId) &&
           incoming().id == existing().id &&
           incoming().workspaceId == existing().workspaceId &&
           incoming().visibility == existing().visibility &&
           incoming().createdAt == existing().createdAt &&
           incoming().updatedAt == request.time &&
-          isWorkspaceActive(workspaceId) && (
-            isAdmin() ||
-            incoming().diff(existing()).affectedKeys().hasOnly([
-              'hari',
-              'tanggalISO',
-              'waktuMulai',
-              'waktuSelesai',
-              'lokasi',
-              'kategori',
-              'perkara',
-              'nomorPerkara',
-              'advokatId',
-              'advokatPendampingIds',
-              'prioritas',
-              'instruksiKhusus',
-              'statusKonfirmasi',
-              'assignedAutomatically',
-              'authorUid',
-              'updatedAt'
-            ])
-          );
+          isWorkspaceActive(workspaceId) &&
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'hari',
+            'tanggalISO',
+            'waktuMulai',
+            'waktuSelesai',
+            'lokasi',
+            'kategori',
+            'perkara',
+            'nomorPerkara',
+            'advokatId',
+            'advokatPendampingIds',
+            'prioritas',
+            'instruksiKhusus',
+            'statusKonfirmasi',
+            'assignedAutomatically',
+            'authorUid',
+            'updatedAt'
+          ]);
 
-        allow delete: if isVerifiedUser() &&
-          isValidId(workspaceId) &&
+        allow delete: if isValidId(workspaceId) &&
           isValidId(itemId) &&
+          workspaceId == 'rglf-main' &&
           existing().workspaceId == workspaceId &&
           isWorkspaceActive(workspaceId);
       }

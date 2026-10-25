@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { onAuthStateChanged, User } from 'firebase/auth';
 import {
   Advokat,
   apakahAdvokatTerlibat,
@@ -35,8 +34,6 @@ import {
   doc,
   ensureWorkspaceInitialized,
   handleFirestoreError,
-  loginWithGoogle,
-  logoutUser,
   onSnapshot,
   OperationType,
   query,
@@ -63,12 +60,11 @@ import {
   Wand2,
   AlertTriangle,
   Plus,
-  LogIn,
-  LogOut,
-  Loader2,
 } from 'lucide-react';
 
 type TabAktif = 'konverter' | 'jadwal' | 'lembar' | 'advokat';
+
+const DEFAULT_ACTOR_ID = 'rglf-office-sync';
 
 function normalisasiJabatan(jabatanLama: string): JabatanAdvokat {
   if (DAFTAR_JABATAN.includes(jabatanLama as JabatanAdvokat)) {
@@ -81,11 +77,7 @@ function normalisasiJabatan(jabatanLama: string): JabatanAdvokat {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabAktif>('konverter');
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [authReady, setAuthReady] = useState<boolean>(false);
   const [cloudReady, setCloudReady] = useState<boolean>(false);
-  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
-  const [authError, setAuthError] = useState<string | null>(null);
 
   const [advokatList, setAdvokatList] = useState<Advokat[]>(INITIAL_ADVOKAT);
   const [metadata, setMetadata] = useState<MetadataDisposisi>(INITIAL_METADATA);
@@ -108,6 +100,8 @@ export default function App() {
   const isTypingCatatanRef = useRef<boolean>(false);
   const catatanDebounceRef = useRef<number | null>(null);
 
+  const getActorUid = () => auth.currentUser?.uid || DEFAULT_ACTOR_ID;
+
   const tampilkanPesan = (pesan: string) => {
     setNotifikasi(pesan);
     setTimeout(() => {
@@ -115,22 +109,8 @@ export default function App() {
     }, 3200);
   };
 
-  // Pantau status autentikasi pengguna
+  // Sinkronisasi Real-Time Multi-Pengguna Langsung Tanpa Gerbang Login
   useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      setAuthReady(true);
-      if (!user) {
-        setCloudReady(false);
-      }
-    });
-    return () => unsubAuth();
-  }, []);
-
-  // Sinkronisasi Real-Time Multi-Pengguna dengan Cloud Database
-  useEffect(() => {
-    if (!authReady || !currentUser) return;
-
     let unsubWorkspace: (() => void) | undefined;
     let unsubAdvokat: (() => void) | undefined;
     let unsubDisposisi: (() => void) | undefined;
@@ -138,7 +118,7 @@ export default function App() {
 
     const startSync = async () => {
       try {
-        await ensureWorkspaceInitialized(currentUser.uid);
+        await ensureWorkspaceInitialized(getActorUid());
         if (cancelled) return;
 
         const wsPath = `workspaces/${WORKSPACE_ID}`;
@@ -264,28 +244,7 @@ export default function App() {
       unsubAdvokat?.();
       unsubDisposisi?.();
     };
-  }, [authReady, currentUser]);
-
-  const handleLogin = async () => {
-    setIsLoggingIn(true);
-    setAuthError(null);
-    try {
-      await loginWithGoogle();
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Gagal masuk dengan akun Google.';
-      setAuthError(msg);
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await logoutUser();
-    } catch (err) {
-      console.error('Gagal keluar:', err);
-    }
-  };
+  }, []);
 
   // Simpan perubahan teks catatanMentah ke Cloud secara otomatis (debounced)
   const handleUbahCatatanMentah = (teksBaru: string) => {
@@ -296,12 +255,10 @@ export default function App() {
     }
     catatanDebounceRef.current = window.setTimeout(async () => {
       isTypingCatatanRef.current = false;
-      if (currentUser) {
-        try {
-          await saveWorkspaceToCloud(metadata, teksBaru, currentUser.uid);
-        } catch (err) {
-          console.error('Gagal menyinkronkan catatan mentah:', err);
-        }
+      try {
+        await saveWorkspaceToCloud(metadata, teksBaru, getActorUid());
+      } catch (err) {
+        console.error('Gagal menyinkronkan catatan mentah:', err);
       }
     }, 900);
   };
@@ -310,10 +267,10 @@ export default function App() {
   const handleUpdateMetadata = async (updated: MetadataDisposisi) => {
     const mingguBerubah = updated.tanggalMulaiMinggu !== metadata.tanggalMulaiMinggu;
     setMetadata(updated);
-    if (!currentUser) return;
+    const actorUid = getActorUid();
 
     try {
-      await saveWorkspaceToCloud(updated, catatanMentah, currentUser.uid);
+      await saveWorkspaceToCloud(updated, catatanMentah, actorUid);
       if (mingguBerubah) {
         const updatedItems = items.map((item) => ({
           ...item,
@@ -321,7 +278,7 @@ export default function App() {
         }));
         setItems(updatedItems);
         await Promise.all(
-          updatedItems.map((it) => updateDisposisiItemInCloud(it, currentUser.uid))
+          updatedItems.map((it) => updateDisposisiItemInCloud(it, actorUid))
         );
       }
     } catch (err) {
@@ -339,30 +296,26 @@ export default function App() {
   const handleKonversiGanti = async () => {
     const baru = parseCatatanMentah(catatanMentah, metadata.tanggalMulaiMinggu, advokatList);
     setItems(baru);
-    if (currentUser) {
-      try {
-        await replaceAllDisposisiItemsInCloud(baru, catatanMentah, metadata, currentUser.uid);
-        tampilkanPesan(
-          `${baru.length} agenda berhasil dikonversi & disinkronkan untuk seluruh pengguna.`
-        );
-      } catch (err) {
-        console.error('Gagal menyinkronkan konversi:', err);
-      }
+    try {
+      await replaceAllDisposisiItemsInCloud(baru, catatanMentah, metadata, getActorUid());
+      tampilkanPesan(
+        `${baru.length} agenda berhasil dikonversi & disinkronkan untuk seluruh pengguna.`
+      );
+    } catch (err) {
+      console.error('Gagal menyinkronkan konversi:', err);
     }
   };
 
   const handleKonversiTambah = async () => {
     const tambahan = parseCatatanMentah(catatanMentah, metadata.tanggalMulaiMinggu, advokatList);
     setItems((prev) => [...prev, ...tambahan]);
-    if (currentUser) {
-      try {
-        await appendDisposisiItemsInCloud(tambahan, catatanMentah, metadata, currentUser.uid);
-        tampilkanPesan(
-          `${tambahan.length} agenda baru ditambahkan & disinkronkan ke database.`
-        );
-      } catch (err) {
-        console.error('Gagal menambahkan agenda ke database:', err);
-      }
+    try {
+      await appendDisposisiItemsInCloud(tambahan, catatanMentah, metadata, getActorUid());
+      tampilkanPesan(
+        `${tambahan.length} agenda baru ditambahkan & disinkronkan ke database.`
+      );
+    } catch (err) {
+      console.error('Gagal menambahkan agenda ke database:', err);
     }
   };
 
@@ -393,17 +346,15 @@ export default function App() {
     const nextCatatan = updatedList.map((it) => formatItemKeBarisCatatan(it)).join('\n');
     setItems(updatedList);
     setCatatanMentah(nextCatatan);
-    if (currentUser) {
-      try {
-        await replaceAllDisposisiItemsInCloud(
-          updatedList,
-          nextCatatan,
-          metadata,
-          currentUser.uid
-        );
-      } catch (err) {
-        console.error('Gagal memperbarui PIC pratinjau:', err);
-      }
+    try {
+      await replaceAllDisposisiItemsInCloud(
+        updatedList,
+        nextCatatan,
+        metadata,
+        getActorUid()
+      );
+    } catch (err) {
+      console.error('Gagal memperbarui PIC pratinjau:', err);
     }
     const namaAdv = advokatList.find((a) => a.id === advokatIdBaru)?.nama || 'Advokat';
     tampilkanPesan(`PIC perkara "${itemTarget.perkara}" diubah ke ${namaAdv}.`);
@@ -427,9 +378,7 @@ export default function App() {
       );
       setCatatanMentah(nextCatatan);
       setItems(yeni);
-      if (currentUser) {
-        await replaceAllDisposisiItemsInCloud(yeni, nextCatatan, metadata, currentUser.uid);
-      }
+      await replaceAllDisposisiItemsInCloud(yeni, nextCatatan, metadata, getActorUid());
       tampilkanPesan(
         'Seluruh baris diatur ke pembagian otomatis berdasarkan spesialisasi & beban.'
       );
@@ -448,14 +397,12 @@ export default function App() {
       .join('\n');
     setItems(updatedList);
     setCatatanMentah(nextCatatan);
-    if (currentUser) {
-      await replaceAllDisposisiItemsInCloud(
-        updatedList,
-        nextCatatan,
-        metadata,
-        currentUser.uid
-      );
-    }
+    await replaceAllDisposisiItemsInCloud(
+      updatedList,
+      nextCatatan,
+      metadata,
+      getActorUid()
+    );
     tampilkanPesan(`Seluruh agenda pada konverter ditugaskan kepada ${adv.nama}.`);
   };
 
@@ -467,14 +414,12 @@ export default function App() {
       advokatList
     );
     setItems(baru);
-    if (currentUser) {
-      await replaceAllDisposisiItemsInCloud(
-        baru,
-        SAMPLE_CATATAN_MENTAH,
-        metadata,
-        currentUser.uid
-      );
-    }
+    await replaceAllDisposisiItemsInCloud(
+      baru,
+      SAMPLE_CATATAN_MENTAH,
+      metadata,
+      getActorUid()
+    );
     tampilkanPesan('Contoh jadwal mingguan Ryan Gumay Law Firm berhasil dimuat ulang.');
   };
 
@@ -500,9 +445,7 @@ export default function App() {
     };
     const namaAdv = advokatList.find((a) => a.id === advokatBaruId)?.nama || 'Advokat Cadangan';
     setItems((prev) => prev.map((i) => (i.id === itemId ? updatedItem : i)));
-    if (currentUser) {
-      await updateDisposisiItemInCloud(updatedItem, currentUser.uid);
-    }
+    await updateDisposisiItemInCloud(updatedItem, getActorUid());
     tampilkanPesan(`Penugasan "${target.perkara}" dialihkan ke ${namaAdv}.`);
   };
 
@@ -629,110 +572,6 @@ export default function App() {
     }
   };
 
-  // Tampilan Memuat Sesi Autentikasi
-  if (!authReady) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-amber-50/40 p-6">
-        <div className="bg-white border border-amber-200 rounded-lg p-8 max-w-md w-full text-center space-y-3">
-          <Loader2 className="w-7 h-7 animate-spin text-amber-700 mx-auto" />
-          <p className="text-sm font-semibold text-slate-900">
-            Menyiapkan Sistem Disposisi Ryan Gumay Law Firm...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // Gerbang Masuk Pengguna (Agar Seluruh Perubahan Tersinkronisasi Antar Pengguna)
-  if (!currentUser) {
-    return (
-      <div className="min-h-screen flex flex-col justify-between bg-amber-50/40 text-slate-900">
-        <header className="bg-white border-b-2 border-yellow-400 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3 font-display text-xl font-bold tracking-tight text-slate-950">
-            <img
-              src="/assets/aistudio/logo_rg_f_775b191a.png"
-              alt="Logo Ryan Gumay Law Firm"
-              referrerPolicy="no-referrer"
-              className="w-10 h-10 object-contain shrink-0"
-            />
-            <span>Ryan Gumay Law Firm</span>
-          </div>
-          <span className="text-xs font-semibold text-amber-900">
-            Sistem Disposisi & Penugasan Mingguan Tim Advokat
-          </span>
-        </header>
-
-        <main className="flex-1 flex items-center justify-center px-6 py-12">
-          <div className="bg-white border border-amber-300 rounded-lg p-8 max-w-lg w-full space-y-6 shadow-xs">
-            <div className="flex items-center gap-4 border-b border-amber-200 pb-5">
-              <div className="w-16 h-16 rounded-lg bg-amber-50 border border-amber-200 p-1.5 shrink-0 flex items-center justify-center">
-                <img
-                  src="/assets/aistudio/logo_rg_f_775b191a.png"
-                  alt="Logo Resmi Ryan Gumay Law Firm"
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-contain"
-                />
-              </div>
-              <div>
-                <h1 className="font-display text-xl font-bold text-slate-950">
-                  RYAN GUMAY LAW FIRM
-                </h1>
-                <p className="text-xs font-semibold text-amber-800 mt-0.5">
-                  Portal Sinkronisasi Disposisi & Jadwal Sidang Terpusat
-                </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  Palembang · Sumatera Selatan
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-2 text-xs text-slate-700 leading-relaxed">
-              <p>
-                Seluruh jadwal persidangan, penugasan Advokat Penanggung Jawab (PIC),{' '}
-                <strong>Advokat Pendamping</strong>, dan dokumen <strong>Lembar Disposisi</strong>{' '}
-                kini disimpan secara terpusat di cloud dan tersinkronisasi otomatis secara
-                real-time untuk semua pengguna.
-              </p>
-              <p>
-                Silakan masuk menggunakan akun Google Anda untuk mengakses dan memperbarui
-                jadwal bersama tim.
-              </p>
-            </div>
-
-            {authError && (
-              <div className="p-3 rounded-md bg-red-50 border border-red-200 text-xs text-red-800">
-                {authError}
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={handleLogin}
-              disabled={isLoggingIn}
-              className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 text-xs font-bold text-slate-950 bg-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 disabled:opacity-60 transition-colors"
-            >
-              {isLoggingIn ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Menghubungkan Akun...</span>
-                </>
-              ) : (
-                <>
-                  <LogIn className="w-4 h-4" />
-                  <span>Masuk dengan Akun Google</span>
-                </>
-              )}
-            </button>
-          </div>
-        </main>
-
-        <footer className="border-t border-amber-200 bg-amber-50/70 px-6 py-4 text-center text-xs text-amber-950/80">
-          Ryan Gumay Law Firm · Penyimpanan Cloud Terpusat & Sinkronisasi Multi-Pengguna
-        </footer>
-      </div>
-    );
-  }
-
   // Ringkasan Statistik Mingguan untuk KPI Bar
   const totalSidangPengadilan = items.filter((i) => i.kategori === 'Sidang Pengadilan').length;
   const totalPrioritasTinggi = items.filter((i) => i.prioritas === 'Tinggi').length;
@@ -808,8 +647,8 @@ export default function App() {
           </button>
         </nav>
 
-        {/* Zone 3: Primary action & user session */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        {/* Zone 3: 1 primary action button */}
+        <div className="flex items-center shrink-0">
           <button
             type="button"
             onClick={handlePrintLangsung}
@@ -817,15 +656,6 @@ export default function App() {
           >
             <Printer className="w-3.5 h-3.5" />
             <span>Cetak Lembar Disposisi</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleLogout}
-            title={`Keluar (${currentUser.email || 'Pengguna'})`}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-amber-50 border border-amber-300 rounded-lg hover:bg-amber-100 transition-colors whitespace-nowrap shrink-0"
-          >
-            <LogOut className="w-3.5 h-3.5 text-amber-800" />
-            <span className="hidden sm:inline">Keluar</span>
           </button>
         </div>
       </header>
@@ -839,9 +669,7 @@ export default function App() {
                 <span>Sistem Internal Kepala Kantor</span>
                 <span aria-hidden="true">·</span>
                 <span>
-                  {cloudReady
-                    ? `Tersinkronisasi Cloud (${currentUser.email})`
-                    : 'Menyinkronkan Data...'}
+                  {cloudReady ? 'Tersinkronisasi untuk Semua Pengguna' : 'Menghubungkan Data...'}
                 </span>
                 <span aria-hidden="true">·</span>
                 <span className="font-mono-tabular">No. {metadata.nomorDokumen}</span>
@@ -959,6 +787,7 @@ export default function App() {
               mondayISO={metadata.tanggalMulaiMinggu}
               advokatList={advokatList}
               onImportSuccess={async (importedItems, formattedLines, mode, sumberLabel) => {
+                const actorUid = getActorUid();
                 if (mode === 'replace') {
                   const nextCatatan = formattedLines.join('\n');
                   setItems(importedItems);
@@ -967,7 +796,7 @@ export default function App() {
                     importedItems,
                     nextCatatan,
                     metadata,
-                    currentUser.uid
+                    actorUid
                   );
                   tampilkanPesan(
                     `${importedItems.length} agenda dari ${sumberLabel} berhasil menggantikan jadwal & disinkronkan.`
@@ -982,7 +811,7 @@ export default function App() {
                     importedItems,
                     nextCatatan,
                     metadata,
-                    currentUser.uid
+                    actorUid
                   );
                   tampilkanPesan(
                     `${importedItems.length} agenda dari ${sumberLabel} berhasil ditambahkan & disinkronkan.`
@@ -1347,7 +1176,7 @@ export default function App() {
             konflikList={konflikJadwal}
             onUpdateItem={async (updated) => {
               setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
-              await updateDisposisiItemInCloud(updated, currentUser.uid);
+              await updateDisposisiItemInCloud(updated, getActorUid());
             }}
             onDeleteItem={async (id) => {
               setItems((prev) => prev.filter((i) => i.id !== id));
@@ -1356,7 +1185,7 @@ export default function App() {
             }}
             onAddItem={async (newItem) => {
               setItems((prev) => [...prev, newItem]);
-              await createDisposisiItemInCloud(newItem, currentUser.uid);
+              await createDisposisiItemInCloud(newItem, getActorUid());
               tampilkanPesan(`Agenda "${newItem.perkara}" berhasil ditambahkan & disinkronkan.`);
             }}
             onAutoReassignConflict={handleAutoReassignConflict}
@@ -1389,12 +1218,12 @@ export default function App() {
             items={items}
             onAddAdvokat={async (baru) => {
               setAdvokatList((prev) => [...prev, baru]);
-              await createAdvokatInCloud(baru, currentUser.uid);
+              await createAdvokatInCloud(baru, getActorUid());
               tampilkanPesan(`Advokat ${baru.nama} berhasil ditambahkan & disinkronkan.`);
             }}
             onUpdateAdvokat={async (updated) => {
               setAdvokatList((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
-              await updateAdvokatInCloud(updated, currentUser.uid);
+              await updateAdvokatInCloud(updated, getActorUid());
               tampilkanPesan(`Data personel ${updated.nama} berhasil diperbarui & disinkronkan.`);
             }}
             onDeleteAdvokat={async (id) => {
