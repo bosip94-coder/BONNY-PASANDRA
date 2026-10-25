@@ -1,0 +1,6 @@
+{
+  "name": "Ryan Gumay Law Firm — Sistem Disposisi & Agenda Mingguan",
+  "description": "Aplikasi konverter daftar agenda cepat menjadi lembar disposisi penugasan mingguan resmi untuk tim advokat Ryan Gumay Law Firm.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
