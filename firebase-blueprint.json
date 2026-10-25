@@ -1,0 +1,375 @@
+{
+  "entities": {
+    "Workspace": {
+      "title": "Workspace",
+      "description": "Shared disposition workspace metadata and raw weekly agenda notes for Ryan Gumay Law Firm.",
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string",
+          "description": "Unique workspace identifier",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "visibility": {
+          "type": "string",
+          "description": "Access visibility tier for verified law firm members",
+          "enum": ["firm_internal"],
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "nomorDokumen": {
+          "type": "string",
+          "description": "Official disposition document number",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "tanggalMulaiMinggu": {
+          "type": "string",
+          "description": "Monday ISO date of the disposition week (YYYY-MM-DD)",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "kepalaKantor": {
+          "type": "string",
+          "description": "Managing Partner name issuing the disposition",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "jabatanKepala": {
+          "type": "string",
+          "description": "Title of the signing head of office",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "kotaKantor": {
+          "type": "string",
+          "description": "City of the law firm office",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "catatanUmum": {
+          "type": "string",
+          "description": "General disposition instructions from the Managing Partner",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "catatanMentah": {
+          "type": "string",
+          "description": "Raw fast agenda text input",
+          "minLength": 0,
+          "maxLength": 20000
+        },
+        "authorUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user who last updated or created the workspace",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "visibility",
+        "nomorDokumen",
+        "tanggalMulaiMinggu",
+        "kepalaKantor",
+        "jabatanKepala",
+        "kotaKantor",
+        "catatanUmum",
+        "catatanMentah",
+        "authorUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Advokat": {
+      "title": "Advokat",
+      "description": "Law firm advocate personnel record with specialization and weekly quota.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique advocate identifier",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "workspaceId": {
+          "type": "string",
+          "description": "Parent workspace identifier",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "visibility": {
+          "type": "string",
+          "description": "Access visibility tier for verified law firm members",
+          "enum": ["firm_internal"],
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "nama": {
+          "type": "string",
+          "description": "Full name and academic/professional titles of the advocate",
+          "minLength": 1,
+          "maxLength": 180
+        },
+        "panggilan": {
+          "type": "string",
+          "description": "Short name keyword used for fast parsing",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "jabatan": {
+          "type": "string",
+          "description": "Position in Ryan Gumay Law Firm",
+          "enum": ["Managing", "Co Managing", "Head Office", "Advokat"],
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "spesialisasi": {
+          "type": "array",
+          "description": "List of legal specializations (max 25 items)",
+          "maxLength": 25
+        },
+        "kuotaMingguan": {
+          "type": "number",
+          "description": "Maximum weekly agenda quota (1-25)"
+        },
+        "nomorInduk": {
+          "type": "string",
+          "description": "Internal bar/firm registration ID",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "kontakWa": {
+          "type": "string",
+          "description": "Office WhatsApp coordination number",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "aktif": {
+          "type": "boolean",
+          "description": "Whether the advocate is active on duty this week"
+        },
+        "authorUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user who created/updated the record",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceId",
+        "visibility",
+        "nama",
+        "panggilan",
+        "jabatan",
+        "spesialisasi",
+        "kuotaMingguan",
+        "nomorInduk",
+        "kontakWa",
+        "aktif",
+        "authorUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DisposisiItem": {
+      "title": "DisposisiItem",
+      "description": "Weekly court hearing or legal disposition assignment item.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique disposition item identifier",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "workspaceId": {
+          "type": "string",
+          "description": "Parent workspace identifier",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "visibility": {
+          "type": "string",
+          "description": "Access visibility tier for verified law firm members",
+          "enum": ["firm_internal"],
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "hari": {
+          "type": "string",
+          "description": "Working day of the week",
+          "enum": ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"],
+          "minLength": 4,
+          "maxLength": 12
+        },
+        "tanggalISO": {
+          "type": "string",
+          "description": "ISO date of the agenda (YYYY-MM-DD)",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "waktuMulai": {
+          "type": "string",
+          "description": "Start time in HH:MM format",
+          "minLength": 4,
+          "maxLength": 10
+        },
+        "waktuSelesai": {
+          "type": "string",
+          "description": "End time in HH:MM format",
+          "minLength": 4,
+          "maxLength": 10
+        },
+        "lokasi": {
+          "type": "string",
+          "description": "Court or institution location",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "kategori": {
+          "type": "string",
+          "description": "Legal agenda category",
+          "enum": [
+            "Sidang Pengadilan",
+            "Pendampingan BAP / Penyidikan",
+            "Mediasi & Negosiasi",
+            "Rapat Kreditur / PKPU",
+            "Konsultasi & Legal Drafting"
+          ],
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "perkara": {
+          "type": "string",
+          "description": "Case name and agenda description",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "nomorPerkara": {
+          "type": "string",
+          "description": "Case registration number",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "advokatId": {
+          "type": "string",
+          "description": "Lead PIC advocate ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "advokatPendampingIds": {
+          "type": "array",
+          "description": "List of accompanying advocate IDs or names (bounded up to 50)",
+          "maxLength": 50
+        },
+        "prioritas": {
+          "type": "string",
+          "description": "Priority level",
+          "enum": ["Tinggi", "Normal"],
+          "minLength": 6,
+          "maxLength": 10
+        },
+        "instruksiKhusus": {
+          "type": "string",
+          "description": "Specific disposition instruction",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "statusKonfirmasi": {
+          "type": "string",
+          "description": "Confirmation status of the assignment",
+          "enum": ["Siap Jalan", "Perlu Koordinasi"],
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "assignedAutomatically": {
+          "type": "boolean",
+          "description": "Whether the PIC was assigned automatically"
+        },
+        "authorUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user who created/updated the item",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceId",
+        "visibility",
+        "hari",
+        "tanggalISO",
+        "waktuMulai",
+        "waktuSelesai",
+        "lokasi",
+        "kategori",
+        "perkara",
+        "nomorPerkara",
+        "advokatId",
+        "advokatPendampingIds",
+        "prioritas",
+        "instruksiKhusus",
+        "statusKonfirmasi",
+        "assignedAutomatically",
+        "authorUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/workspaces/{workspaceId}": {
+      "schema": { "$ref": "#/entities/Workspace" },
+      "description": "Root workspace document storing official disposition metadata and raw notes."
+    },
+    "/workspaces/{workspaceId}/advokat/{advokatId}": {
+      "schema": { "$ref": "#/entities/Advokat" },
+      "description": "Subcollection of advocate personnel records belonging to the workspace."
+    },
+    "/workspaces/{workspaceId}/disposisi/{itemId}": {
+      "schema": { "$ref": "#/entities/DisposisiItem" },
+      "description": "Subcollection of weekly disposition agenda items belonging to the workspace."
+    }
+  }
+}

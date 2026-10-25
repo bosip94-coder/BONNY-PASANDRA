@@ -1,0 +1,381 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Hardened Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        request.auth.token.email == 'bosip94@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isWorkspaceActive(workspaceId) {
+      return (
+        exists(/databases/$(database)/documents/workspaces/$(workspaceId)) &&
+        get(/databases/$(database)/documents/workspaces/$(workspaceId)).data.visibility == 'firm_internal'
+      ) || (
+        existsAfter(/databases/$(database)/documents/workspaces/$(workspaceId)) &&
+        getAfter(/databases/$(database)/documents/workspaces/$(workspaceId)).data.visibility == 'firm_internal'
+      );
+    }
+
+    // 3. Entity Validation Blueprints (Anti-Update-Gap)
+    function isValidWorkspace(data, workspaceId) {
+      return data.keys().hasAll([
+          'workspaceId',
+          'visibility',
+          'nomorDokumen',
+          'tanggalMulaiMinggu',
+          'kepalaKantor',
+          'jabatanKepala',
+          'kotaKantor',
+          'catatanUmum',
+          'catatanMentah',
+          'authorUid',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'workspaceId',
+          'visibility',
+          'nomorDokumen',
+          'tanggalMulaiMinggu',
+          'kepalaKantor',
+          'jabatanKepala',
+          'kotaKantor',
+          'catatanUmum',
+          'catatanMentah',
+          'authorUid',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.workspaceId is string && data.workspaceId == workspaceId &&
+        data.visibility is string && data.visibility == 'firm_internal' &&
+        data.nomorDokumen is string && data.nomorDokumen.size() >= 1 && data.nomorDokumen.size() <= 120 &&
+        data.tanggalMulaiMinggu is string && data.tanggalMulaiMinggu.size() == 10 && data.tanggalMulaiMinggu.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.kepalaKantor is string && data.kepalaKantor.size() >= 1 && data.kepalaKantor.size() <= 160 &&
+        data.jabatanKepala is string && data.jabatanKepala.size() >= 1 && data.jabatanKepala.size() <= 100 &&
+        data.kotaKantor is string && data.kotaKantor.size() >= 1 && data.kotaKantor.size() <= 80 &&
+        data.catatanUmum is string && data.catatanUmum.size() >= 1 && data.catatanUmum.size() <= 2000 &&
+        data.catatanMentah is string && data.catatanMentah.size() <= 20000 &&
+        data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128 &&
+        data.authorUid == request.auth.uid &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidAdvokat(data, workspaceId, advokatId) {
+      return data.keys().hasAll([
+          'id',
+          'workspaceId',
+          'visibility',
+          'nama',
+          'panggilan',
+          'jabatan',
+          'spesialisasi',
+          'kuotaMingguan',
+          'nomorInduk',
+          'kontakWa',
+          'aktif',
+          'authorUid',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'workspaceId',
+          'visibility',
+          'nama',
+          'panggilan',
+          'jabatan',
+          'spesialisasi',
+          'kuotaMingguan',
+          'nomorInduk',
+          'kontakWa',
+          'aktif',
+          'authorUid',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.id is string && data.id == advokatId &&
+        data.workspaceId is string && data.workspaceId == workspaceId &&
+        data.visibility is string && data.visibility == 'firm_internal' &&
+        data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 180 &&
+        data.panggilan is string && data.panggilan.size() >= 1 && data.panggilan.size() <= 80 &&
+        data.jabatan is string && data.jabatan.size() <= 40 &&
+        (data.jabatan == 'Managing' || data.jabatan == 'Co Managing' || data.jabatan == 'Head Office' || data.jabatan == 'Advokat') &&
+        data.spesialisasi is list && data.spesialisasi.size() >= 1 && data.spesialisasi.size() <= 25 &&
+        data.spesialisasi[0] is string && data.spesialisasi[0].size() >= 1 && data.spesialisasi[0].size() <= 120 &&
+        data.kuotaMingguan is int && data.kuotaMingguan >= 1 && data.kuotaMingguan <= 25 &&
+        data.nomorInduk is string && data.nomorInduk.size() >= 1 && data.nomorInduk.size() <= 80 &&
+        data.kontakWa is string && data.kontakWa.size() >= 1 && data.kontakWa.size() <= 60 &&
+        data.aktif is bool &&
+        data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128 &&
+        data.authorUid == request.auth.uid &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    function isValidDisposisiItem(data, workspaceId, itemId) {
+      return data.keys().hasAll([
+          'id',
+          'workspaceId',
+          'visibility',
+          'hari',
+          'tanggalISO',
+          'waktuMulai',
+          'waktuSelesai',
+          'lokasi',
+          'kategori',
+          'perkara',
+          'nomorPerkara',
+          'advokatId',
+          'advokatPendampingIds',
+          'prioritas',
+          'instruksiKhusus',
+          'statusKonfirmasi',
+          'assignedAutomatically',
+          'authorUid',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id',
+          'workspaceId',
+          'visibility',
+          'hari',
+          'tanggalISO',
+          'waktuMulai',
+          'waktuSelesai',
+          'lokasi',
+          'kategori',
+          'perkara',
+          'nomorPerkara',
+          'advokatId',
+          'advokatPendampingIds',
+          'prioritas',
+          'instruksiKhusus',
+          'statusKonfirmasi',
+          'assignedAutomatically',
+          'authorUid',
+          'createdAt',
+          'updatedAt'
+        ]) &&
+        data.id is string && data.id == itemId &&
+        data.workspaceId is string && data.workspaceId == workspaceId &&
+        data.visibility is string && data.visibility == 'firm_internal' &&
+        data.hari is string && data.hari.size() <= 12 &&
+        (data.hari == 'Senin' || data.hari == 'Selasa' || data.hari == 'Rabu' || data.hari == 'Kamis' || data.hari == 'Jumat' || data.hari == 'Sabtu') &&
+        data.tanggalISO is string && data.tanggalISO.size() == 10 && data.tanggalISO.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        data.waktuMulai is string && data.waktuMulai.size() >= 4 && data.waktuMulai.size() <= 10 &&
+        data.waktuSelesai is string && data.waktuSelesai.size() >= 4 && data.waktuSelesai.size() <= 10 &&
+        data.lokasi is string && data.lokasi.size() >= 1 && data.lokasi.size() <= 200 &&
+        data.kategori is string && data.kategori.size() <= 80 &&
+        (
+          data.kategori == 'Sidang Pengadilan' ||
+          data.kategori == 'Pendampingan BAP / Penyidikan' ||
+          data.kategori == 'Mediasi & Negosiasi' ||
+          data.kategori == 'Rapat Kreditur / PKPU' ||
+          data.kategori == 'Konsultasi & Legal Drafting'
+        ) &&
+        data.perkara is string && data.perkara.size() >= 1 && data.perkara.size() <= 500 &&
+        data.nomorPerkara is string && data.nomorPerkara.size() >= 1 && data.nomorPerkara.size() <= 160 &&
+        data.advokatId is string && data.advokatId.size() >= 1 && data.advokatId.size() <= 128 && data.advokatId.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.advokatPendampingIds is list && data.advokatPendampingIds.size() <= 50 &&
+        (data.advokatPendampingIds.size() == 0 || (data.advokatPendampingIds[0] is string && data.advokatPendampingIds[0].size() >= 1 && data.advokatPendampingIds[0].size() <= 180)) &&
+        data.prioritas is string && data.prioritas.size() <= 10 &&
+        (data.prioritas == 'Tinggi' || data.prioritas == 'Normal') &&
+        data.instruksiKhusus is string && data.instruksiKhusus.size() >= 1 && data.instruksiKhusus.size() <= 1000 &&
+        data.statusKonfirmasi is string && data.statusKonfirmasi.size() <= 40 &&
+        (data.statusKonfirmasi == 'Siap Jalan' || data.statusKonfirmasi == 'Perlu Koordinasi') &&
+        data.assignedAutomatically is bool &&
+        data.authorUid is string && data.authorUid.size() >= 1 && data.authorUid.size() <= 128 &&
+        data.authorUid == request.auth.uid &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    // 4. Admins Collection
+    match /admins/{adminUid} {
+      allow get: if isVerifiedUser() && isValidId(adminUid) && request.auth.uid == adminUid;
+      allow list, create, update, delete: if false;
+    }
+
+    // 5. Workspaces Collection
+    match /workspaces/{workspaceId} {
+      allow get: if isVerifiedUser() &&
+        isValidId(workspaceId) &&
+        workspaceId == 'rglf-main' &&
+        (resource == null || existing().visibility == 'firm_internal');
+      allow list: if false;
+
+      allow create: if isVerifiedUser() &&
+        isValidId(workspaceId) &&
+        workspaceId == 'rglf-main' &&
+        isValidWorkspace(incoming(), workspaceId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser() &&
+        isValidId(workspaceId) &&
+        workspaceId == 'rglf-main' &&
+        isValidWorkspace(incoming(), workspaceId) &&
+        incoming().workspaceId == existing().workspaceId &&
+        incoming().visibility == existing().visibility &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'nomorDokumen',
+            'tanggalMulaiMinggu',
+            'kepalaKantor',
+            'jabatanKepala',
+            'kotaKantor',
+            'catatanUmum',
+            'catatanMentah',
+            'authorUid',
+            'updatedAt'
+          ])
+        );
+
+      allow delete: if false;
+
+      // 6. Advokat Subcollection
+      match /advokat/{advokatId} {
+        allow get: if isVerifiedUser() &&
+          isValidId(workspaceId) &&
+          isValidId(advokatId) &&
+          (resource == null || (existing().workspaceId == workspaceId && existing().visibility == 'firm_internal')) &&
+          isWorkspaceActive(workspaceId);
+
+        allow list: if isVerifiedUser() &&
+          isValidId(workspaceId) &&
+          existing().workspaceId == workspaceId &&
+          existing().visibility == 'firm_internal';
+
+        allow create: if isVerifiedUser() &&
+          isValidId(workspaceId) &&
+          isValidId(advokatId) &&
+          isValidAdvokat(incoming(), workspaceId, advokatId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isWorkspaceActive(workspaceId);
+
+        allow update: if isVerifiedUser() &&
+          isValidId(workspaceId) &&
+          isValidId(advokatId) &&
+          isValidAdvokat(incoming(), workspaceId, advokatId) &&
+          incoming().id == existing().id &&
+          incoming().workspaceId == existing().workspaceId &&
+          incoming().visibility == existing().visibility &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          isWorkspaceActive(workspaceId) && (
+            isAdmin() ||
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'nama',
+              'panggilan',
+              'jabatan',
+              'spesialisasi',
+              'kuotaMingguan',
+              'nomorInduk',
+              'kontakWa',
+              'aktif',
+              'authorUid',
+              'updatedAt'
+            ])
+          );
+
+        allow delete: if isVerifiedUser() &&
+          isValidId(workspaceId) &&
+          isValidId(advokatId) &&
+          existing().workspaceId == workspaceId &&
+          isWorkspaceActive(workspaceId);
+      }
+
+      // 7. Disposisi Subcollection
+      match /disposisi/{itemId} {
+        allow get: if isVerifiedUser() &&
+          isValidId(workspaceId) &&
+          isValidId(itemId) &&
+          (resource == null || (existing().workspaceId == workspaceId && existing().visibility == 'firm_internal')) &&
+          isWorkspaceActive(workspaceId);
+
+        allow list: if isVerifiedUser() &&
+          isValidId(workspaceId) &&
+          existing().workspaceId == workspaceId &&
+          existing().visibility == 'firm_internal';
+
+        allow create: if isVerifiedUser() &&
+          isValidId(workspaceId) &&
+          isValidId(itemId) &&
+          isValidDisposisiItem(incoming(), workspaceId, itemId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          isWorkspaceActive(workspaceId);
+
+        allow update: if isVerifiedUser() &&
+          isValidId(workspaceId) &&
+          isValidId(itemId) &&
+          isValidDisposisiItem(incoming(), workspaceId, itemId) &&
+          incoming().id == existing().id &&
+          incoming().workspaceId == existing().workspaceId &&
+          incoming().visibility == existing().visibility &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          isWorkspaceActive(workspaceId) && (
+            isAdmin() ||
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'hari',
+              'tanggalISO',
+              'waktuMulai',
+              'waktuSelesai',
+              'lokasi',
+              'kategori',
+              'perkara',
+              'nomorPerkara',
+              'advokatId',
+              'advokatPendampingIds',
+              'prioritas',
+              'instruksiKhusus',
+              'statusKonfirmasi',
+              'assignedAutomatically',
+              'authorUid',
+              'updatedAt'
+            ])
+          );
+
+        allow delete: if isVerifiedUser() &&
+          isValidId(workspaceId) &&
+          isValidId(itemId) &&
+          existing().workspaceId == workspaceId &&
+          isWorkspaceActive(workspaceId);
+      }
+    }
+  }
+}

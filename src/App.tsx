@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import {
   Advokat,
   apakahAdvokatTerlibat,
@@ -22,6 +23,31 @@ import {
   resolveNamaPendamping,
   SAMPLE_CATATAN_MENTAH,
 } from './data/dispositionEngine';
+import {
+  appendDisposisiItemsInCloud,
+  auth,
+  collection,
+  createAdvokatInCloud,
+  createDisposisiItemInCloud,
+  db,
+  deleteAdvokatInCloud,
+  deleteDisposisiItemInCloud,
+  doc,
+  ensureWorkspaceInitialized,
+  handleFirestoreError,
+  loginWithGoogle,
+  logoutUser,
+  onSnapshot,
+  OperationType,
+  query,
+  replaceAllDisposisiItemsInCloud,
+  saveWorkspaceToCloud,
+  updateAdvokatInCloud,
+  updateDisposisiItemInCloud,
+  VISIBILITY_TIER,
+  where,
+  WORKSPACE_ID,
+} from './lib/firebase';
 import { LembarDisposisiResmi } from './components/LembarDisposisiResmi';
 import { TabelJadwalInteraktif } from './components/TabelJadwalInteraktif';
 import { ManajemenTimAdvokat } from './components/ManajemenTimAdvokat';
@@ -37,11 +63,12 @@ import {
   Wand2,
   AlertTriangle,
   Plus,
+  LogIn,
+  LogOut,
+  Loader2,
 } from 'lucide-react';
 
 type TabAktif = 'konverter' | 'jadwal' | 'lembar' | 'advokat';
-
-const STORAGE_KEY = 'rglf_disposisi_standalone_v2';
 
 function normalisasiJabatan(jabatanLama: string): JabatanAdvokat {
   if (DAFTAR_JABATAN.includes(jabatanLama as JabatanAdvokat)) {
@@ -54,120 +81,252 @@ function normalisasiJabatan(jabatanLama: string): JabatanAdvokat {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabAktif>('konverter');
-  const [advokatList, setAdvokatList] = useState<Advokat[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed.advokatList) && parsed.advokatList.length > 0) {
-          return parsed.advokatList.map((a: Advokat) => ({
-            ...a,
-            jabatan: normalisasiJabatan(a.jabatan),
-          }));
-        }
-      }
-    } catch {
-      // Fallback to initial
-    }
-    return INITIAL_ADVOKAT;
-  });
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState<boolean>(false);
+  const [cloudReady, setCloudReady] = useState<boolean>(false);
+  const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  const [metadata, setMetadata] = useState<MetadataDisposisi>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.metadata) {
-          return {
-            ...parsed.metadata,
-            jabatanKepala:
-              parsed.metadata.jabatanKepala === 'Managing Partner / Kepala Kantor'
-                ? 'Managing'
-                : parsed.metadata.jabatanKepala || 'Managing',
-          };
-        }
-      }
-    } catch {
-      // Fallback
-    }
-    return INITIAL_METADATA;
-  });
-
-  const [catatanMentah, setCatatanMentah] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (typeof parsed.catatanMentah === 'string') return parsed.catatanMentah;
-      }
-    } catch {
-      // Fallback
-    }
-    return SAMPLE_CATATAN_MENTAH;
-  });
-
-  const [items, setItems] = useState<ItemDisposisi[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed.items) && parsed.items.length > 0) {
-          return parsed.items;
-        }
-      }
-    } catch {
-      // Fallback
-    }
-    return parseCatatanMentah(
+  const [advokatList, setAdvokatList] = useState<Advokat[]>(INITIAL_ADVOKAT);
+  const [metadata, setMetadata] = useState<MetadataDisposisi>(INITIAL_METADATA);
+  const [catatanMentah, setCatatanMentah] = useState<string>(SAMPLE_CATATAN_MENTAH);
+  const [items, setItems] = useState<ItemDisposisi[]>(() =>
+    parseCatatanMentah(
       SAMPLE_CATATAN_MENTAH,
       INITIAL_METADATA.tanggalMulaiMinggu,
       INITIAL_ADVOKAT
-    );
-  });
+    )
+  );
 
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [notifikasi, setNotifikasi] = useState<string | null>(null);
-  const [advokatPilihanKonverter, setAdvokatPilihanKonverter] = useState<string>('adv-4'); // Default Iqbal Yassin
+  const [advokatPilihanKonverter, setAdvokatPilihanKonverter] = useState<string>('adv-4');
   const [modeKelompokDisposisi, setModeKelompokDisposisi] =
     useState<ModePengelompokanDisposisi>('hari');
   const [filterAdvokatDisposisi, setFilterAdvokatDisposisi] = useState<string>('semua');
 
-  // Simpan otomatis ke localStorage (Mandiri / Tanpa Database Eksternal)
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({
-          advokatList,
-          metadata,
-          catatanMentah,
-          items,
-        })
-      );
-    } catch {
-      // Ignore storage quota errors
-    }
-  }, [advokatList, metadata, catatanMentah, items]);
-
-  // Sinkronkan tanggalISO jika Kepala Kantor mengubah tanggal Senin awal minggu
-  const handleUpdateMetadata = (updated: MetadataDisposisi) => {
-    const mingguBerubah = updated.tanggalMulaiMinggu !== metadata.tanggalMulaiMinggu;
-    setMetadata(updated);
-    if (mingguBerubah) {
-      setItems((prev) =>
-        prev.map((item) => ({
-          ...item,
-          tanggalISO: hitungTanggalDariHari(updated.tanggalMulaiMinggu, item.hari),
-        }))
-      );
-    }
-  };
+  const isTypingCatatanRef = useRef<boolean>(false);
+  const catatanDebounceRef = useRef<number | null>(null);
 
   const tampilkanPesan = (pesan: string) => {
     setNotifikasi(pesan);
     setTimeout(() => {
       setNotifikasi((curr) => (curr === pesan ? null : curr));
     }, 3200);
+  };
+
+  // Pantau status autentikasi pengguna
+  useEffect(() => {
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setAuthReady(true);
+      if (!user) {
+        setCloudReady(false);
+      }
+    });
+    return () => unsubAuth();
+  }, []);
+
+  // Sinkronisasi Real-Time Multi-Pengguna dengan Cloud Database
+  useEffect(() => {
+    if (!authReady || !currentUser) return;
+
+    let unsubWorkspace: (() => void) | undefined;
+    let unsubAdvokat: (() => void) | undefined;
+    let unsubDisposisi: (() => void) | undefined;
+    let cancelled = false;
+
+    const startSync = async () => {
+      try {
+        await ensureWorkspaceInitialized(currentUser.uid);
+        if (cancelled) return;
+
+        const wsPath = `workspaces/${WORKSPACE_ID}`;
+        unsubWorkspace = onSnapshot(
+          doc(db, 'workspaces', WORKSPACE_ID),
+          (snap) => {
+            if (!snap.exists()) return;
+            const data = snap.data();
+            setMetadata({
+              nomorDokumen: String(data.nomorDokumen || INITIAL_METADATA.nomorDokumen),
+              tanggalMulaiMinggu: String(
+                data.tanggalMulaiMinggu || INITIAL_METADATA.tanggalMulaiMinggu
+              ),
+              kepalaKantor: String(data.kepalaKantor || INITIAL_METADATA.kepalaKantor),
+              jabatanKepala:
+                data.jabatanKepala === 'Managing Partner / Kepala Kantor'
+                  ? 'Managing'
+                  : String(data.jabatanKepala || 'Managing'),
+              kotaKantor: String(data.kotaKantor || INITIAL_METADATA.kotaKantor),
+              catatanUmum: String(data.catatanUmum || INITIAL_METADATA.catatanUmum),
+            });
+            if (!isTypingCatatanRef.current && typeof data.catatanMentah === 'string') {
+              setCatatanMentah(data.catatanMentah);
+            }
+            setCloudReady(true);
+          },
+          (error) => {
+            handleFirestoreError(error, OperationType.GET, wsPath);
+          }
+        );
+
+        const advPath = `workspaces/${WORKSPACE_ID}/advokat`;
+        const advQuery = query(
+          collection(db, 'workspaces', WORKSPACE_ID, 'advokat'),
+          where('workspaceId', '==', WORKSPACE_ID),
+          where('visibility', '==', VISIBILITY_TIER)
+        );
+        unsubAdvokat = onSnapshot(
+          advQuery,
+          (snap) => {
+            if (snap.empty) return;
+            const list: Advokat[] = snap.docs.map((d) => {
+              const raw = d.data();
+              return {
+                id: String(raw.id || d.id),
+                nama: String(raw.nama || ''),
+                panggilan: String(raw.panggilan || ''),
+                jabatan: normalisasiJabatan(String(raw.jabatan || 'Advokat')),
+                spesialisasi: Array.isArray(raw.spesialisasi)
+                  ? raw.spesialisasi.map(String)
+                  : ['Litigasi Umum'],
+                kuotaMingguan: Number(raw.kuotaMingguan) || 6,
+                nomorInduk: String(raw.nomorInduk || '-'),
+                telepon: String(raw.kontakWa || raw.telepon || '-'),
+                aktif: Boolean(raw.aktif),
+              };
+            });
+            list.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+            setAdvokatList(list);
+          },
+          (error) => {
+            handleFirestoreError(error, OperationType.LIST, advPath);
+          }
+        );
+
+        const dispPath = `workspaces/${WORKSPACE_ID}/disposisi`;
+        const dispQuery = query(
+          collection(db, 'workspaces', WORKSPACE_ID, 'disposisi'),
+          where('workspaceId', '==', WORKSPACE_ID),
+          where('visibility', '==', VISIBILITY_TIER)
+        );
+        unsubDisposisi = onSnapshot(
+          dispQuery,
+          (snap) => {
+            const list: ItemDisposisi[] = snap.docs.map((d) => {
+              const raw = d.data();
+              const pendampingArr = Array.isArray(raw.advokatPendampingIds)
+                ? raw.advokatPendampingIds.map(String).filter(Boolean)
+                : [];
+              return {
+                id: String(raw.id || d.id),
+                hari: (raw.hari as ItemDisposisi['hari']) || 'Senin',
+                tanggalISO: String(raw.tanggalISO || INITIAL_METADATA.tanggalMulaiMinggu),
+                waktuMulai: String(raw.waktuMulai || '09:00'),
+                waktuSelesai: String(raw.waktuSelesai || '11:00'),
+                lokasi: String(raw.lokasi || 'Kantor Ryan Gumay Law Firm'),
+                kategori: (raw.kategori as ItemDisposisi['kategori']) || 'Sidang Pengadilan',
+                perkara: String(raw.perkara || ''),
+                nomorPerkara: String(raw.nomorPerkara || '-'),
+                advokatId: String(raw.advokatId || 'adv-1'),
+                advokatPendampingIds: pendampingArr,
+                advokatPendampingId: pendampingArr[0] || undefined,
+                prioritas: raw.prioritas === 'Tinggi' ? 'Tinggi' : 'Normal',
+                instruksiKhusus: String(raw.instruksiKhusus || 'Laksanakan sesuai SOP kantor.'),
+                statusKonfirmasi:
+                  raw.statusKonfirmasi === 'Perlu Koordinasi'
+                    ? 'Perlu Koordinasi'
+                    : 'Siap Jalan',
+                assignedAutomatically: Boolean(raw.assignedAutomatically),
+              };
+            });
+            list.sort((a, b) => {
+              const dayDiff = HARI_URUTAN.indexOf(a.hari) - HARI_URUTAN.indexOf(b.hari);
+              if (dayDiff !== 0) return dayDiff;
+              return a.waktuMulai.localeCompare(b.waktuMulai);
+            });
+            setItems(list);
+          },
+          (error) => {
+            handleFirestoreError(error, OperationType.LIST, dispPath);
+          }
+        );
+      } catch (err) {
+        console.error('Gagal menginisialisasi sinkronisasi database:', err);
+      }
+    };
+
+    startSync();
+
+    return () => {
+      cancelled = true;
+      unsubWorkspace?.();
+      unsubAdvokat?.();
+      unsubDisposisi?.();
+    };
+  }, [authReady, currentUser]);
+
+  const handleLogin = async () => {
+    setIsLoggingIn(true);
+    setAuthError(null);
+    try {
+      await loginWithGoogle();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal masuk dengan akun Google.';
+      setAuthError(msg);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logoutUser();
+    } catch (err) {
+      console.error('Gagal keluar:', err);
+    }
+  };
+
+  // Simpan perubahan teks catatanMentah ke Cloud secara otomatis (debounced)
+  const handleUbahCatatanMentah = (teksBaru: string) => {
+    isTypingCatatanRef.current = true;
+    setCatatanMentah(teksBaru);
+    if (catatanDebounceRef.current) {
+      window.clearTimeout(catatanDebounceRef.current);
+    }
+    catatanDebounceRef.current = window.setTimeout(async () => {
+      isTypingCatatanRef.current = false;
+      if (currentUser) {
+        try {
+          await saveWorkspaceToCloud(metadata, teksBaru, currentUser.uid);
+        } catch (err) {
+          console.error('Gagal menyinkronkan catatan mentah:', err);
+        }
+      }
+    }, 900);
+  };
+
+  // Sinkronkan tanggalISO jika Kepala Kantor mengubah tanggal Senin awal minggu
+  const handleUpdateMetadata = async (updated: MetadataDisposisi) => {
+    const mingguBerubah = updated.tanggalMulaiMinggu !== metadata.tanggalMulaiMinggu;
+    setMetadata(updated);
+    if (!currentUser) return;
+
+    try {
+      await saveWorkspaceToCloud(updated, catatanMentah, currentUser.uid);
+      if (mingguBerubah) {
+        const updatedItems = items.map((item) => ({
+          ...item,
+          tanggalISO: hitungTanggalDariHari(updated.tanggalMulaiMinggu, item.hari),
+        }));
+        setItems(updatedItems);
+        await Promise.all(
+          updatedItems.map((it) => updateDisposisiItemInCloud(it, currentUser.uid))
+        );
+      }
+    } catch (err) {
+      console.error('Gagal memperbarui metadata disposisi:', err);
+    }
   };
 
   // Pratinjau langsung dari teks catatan mentah yang sedang diketik
@@ -177,61 +336,80 @@ export default function App() {
 
   const konflikJadwal = useMemo(() => evaluasiKonflikJadwal(items), [items]);
 
-  const handleKonversiGanti = () => {
+  const handleKonversiGanti = async () => {
     const baru = parseCatatanMentah(catatanMentah, metadata.tanggalMulaiMinggu, advokatList);
     setItems(baru);
-    tampilkanPesan(
-      `${baru.length} agenda berhasil dikonversi menjadi Lembar Disposisi Mingguan.`
-    );
+    if (currentUser) {
+      try {
+        await replaceAllDisposisiItemsInCloud(baru, catatanMentah, metadata, currentUser.uid);
+        tampilkanPesan(
+          `${baru.length} agenda berhasil dikonversi & disinkronkan untuk seluruh pengguna.`
+        );
+      } catch (err) {
+        console.error('Gagal menyinkronkan konversi:', err);
+      }
+    }
   };
 
-  const handleKonversiTambah = () => {
+  const handleKonversiTambah = async () => {
     const tambahan = parseCatatanMentah(catatanMentah, metadata.tanggalMulaiMinggu, advokatList);
     setItems((prev) => [...prev, ...tambahan]);
-    tampilkanPesan(`${tambahan.length} agenda baru ditambahkan ke daftar disposisi aktif.`);
+    if (currentUser) {
+      try {
+        await appendDisposisiItemsInCloud(tambahan, catatanMentah, metadata, currentUser.uid);
+        tampilkanPesan(
+          `${tambahan.length} agenda baru ditambahkan & disinkronkan ke database.`
+        );
+      } catch (err) {
+        console.error('Gagal menambahkan agenda ke database:', err);
+      }
+    }
   };
 
   const handleSisipkanTemplateBaris = (baris: string) => {
-    setCatatanMentah((prev) => (prev.trim() ? `${prev.trim()}\n${baris}` : baris));
+    const nextText = catatanMentah.trim() ? `${catatanMentah.trim()}\n${baris}` : baris;
+    handleUbahCatatanMentah(nextText);
   };
 
   const formatItemKeBarisCatatan = (item: ItemDisposisi, advIdBaru?: string): string => {
     const targetAdvId = advIdBaru || item.advokatId;
     const adv = advokatList.find((a) => a.id === targetAdvId);
     const namaAdv = adv ? adv.panggilan : 'Otomatis';
-    const noStr = item.nomorPerkara && item.nomorPerkara !== '-' ? ` (No. ${item.nomorPerkara})` : '';
+    const noStr =
+      item.nomorPerkara && item.nomorPerkara !== '-' ? ` (No. ${item.nomorPerkara})` : '';
     const prioStr = item.prioritas === 'Tinggi' ? 'Prioritas Tinggi - ' : '';
     return `${item.hari} ${item.waktuMulai} | ${item.lokasi} | ${item.perkara}${noStr} | ${namaAdv} | ${prioStr}${item.instruksiKhusus}`;
   };
 
-  const handleUbahAdvokatPadaPratinjau = (itemTarget: ItemDisposisi, advokatIdBaru: string) => {
+  const handleUbahAdvokatPadaPratinjau = async (
+    itemTarget: ItemDisposisi,
+    advokatIdBaru: string
+  ) => {
     const updatedList = hasilPratinjau.map((it) =>
       it.id === itemTarget.id
         ? { ...it, advokatId: advokatIdBaru, assignedAutomatically: false }
         : it
     );
+    const nextCatatan = updatedList.map((it) => formatItemKeBarisCatatan(it)).join('\n');
     setItems(updatedList);
-    setCatatanMentah(updatedList.map((it) => formatItemKeBarisCatatan(it)).join('\n'));
+    setCatatanMentah(nextCatatan);
+    if (currentUser) {
+      try {
+        await replaceAllDisposisiItemsInCloud(
+          updatedList,
+          nextCatatan,
+          metadata,
+          currentUser.uid
+        );
+      } catch (err) {
+        console.error('Gagal memperbarui PIC pratinjau:', err);
+      }
+    }
     const namaAdv = advokatList.find((a) => a.id === advokatIdBaru)?.nama || 'Advokat';
     tampilkanPesan(`PIC perkara "${itemTarget.perkara}" diubah ke ${namaAdv}.`);
   };
 
-  const handleUbahPendampingPadaPratinjau = (
-    itemTarget: ItemDisposisi,
-    pendampingIdBaru: string
-  ) => {
-    const updatedList = hasilPratinjau.map((it) =>
-      it.id === itemTarget.id
-        ? { ...it, advokatPendampingId: pendampingIdBaru || undefined }
-        : it
-    );
-    setItems(updatedList);
-    const namaAdv =
-      advokatList.find((a) => a.id === pendampingIdBaru)?.nama || 'Tanpa Pendamping';
-    tampilkanPesan(`Advokat Pendamping diperbarui: ${namaAdv}.`);
-  };
-
-  const handleTerapkanAdvokatKeSemuaBaris = () => {
+  const handleTerapkanAdvokatKeSemuaBaris = async () => {
     if (advokatPilihanKonverter === 'auto') {
       const resetOtomatis = hasilPratinjau.map(
         (it) =>
@@ -241,14 +419,20 @@ export default function App() {
             it.prioritas === 'Tinggi' ? 'Prioritas Tinggi - ' : ''
           }${it.instruksiKhusus}`
       );
+      const nextCatatan = resetOtomatis.join('\n');
       const yeni = parseCatatanMentah(
-        resetOtomatis.join('\n'),
+        nextCatatan,
         metadata.tanggalMulaiMinggu,
         advokatList
       );
-      setCatatanMentah(resetOtomatis.join('\n'));
+      setCatatanMentah(nextCatatan);
       setItems(yeni);
-      tampilkanPesan('Seluruh baris diatur ke pembagian otomatis berdasarkan spesialisasi & beban.');
+      if (currentUser) {
+        await replaceAllDisposisiItemsInCloud(yeni, nextCatatan, metadata, currentUser.uid);
+      }
+      tampilkanPesan(
+        'Seluruh baris diatur ke pembagian otomatis berdasarkan spesialisasi & beban.'
+      );
       return;
     }
 
@@ -259,12 +443,23 @@ export default function App() {
       advokatId: adv.id,
       assignedAutomatically: false,
     }));
+    const nextCatatan = updatedList
+      .map((it) => formatItemKeBarisCatatan(it, adv.id))
+      .join('\n');
     setItems(updatedList);
-    setCatatanMentah(updatedList.map((it) => formatItemKeBarisCatatan(it, adv.id)).join('\n'));
+    setCatatanMentah(nextCatatan);
+    if (currentUser) {
+      await replaceAllDisposisiItemsInCloud(
+        updatedList,
+        nextCatatan,
+        metadata,
+        currentUser.uid
+      );
+    }
     tampilkanPesan(`Seluruh agenda pada konverter ditugaskan kepada ${adv.nama}.`);
   };
 
-  const handleResetKeContoh = () => {
+  const handleResetKeContoh = async () => {
     setCatatanMentah(SAMPLE_CATATAN_MENTAH);
     const baru = parseCatatanMentah(
       SAMPLE_CATATAN_MENTAH,
@@ -272,33 +467,43 @@ export default function App() {
       advokatList
     );
     setItems(baru);
+    if (currentUser) {
+      await replaceAllDisposisiItemsInCloud(
+        baru,
+        SAMPLE_CATATAN_MENTAH,
+        metadata,
+        currentUser.uid
+      );
+    }
     tampilkanPesan('Contoh jadwal mingguan Ryan Gumay Law Firm berhasil dimuat ulang.');
   };
 
-  const handleAutoReassignConflict = (itemId: string) => {
-    setItems((prev) => {
-      const target = prev.find((i) => i.id === itemId);
-      if (!target) return prev;
-      const otherItems = prev.filter((i) => i.id !== itemId);
-      const kandidatLain = advokatList.filter(
-        (a) => a.aktif && a.id !== target.advokatId
-      );
-      const advokatBaruId = pilihAdvokatOtomatis(
-        `${target.lokasi} ${target.perkara}`,
-        target.kategori,
-        target.hari,
-        target.waktuMulai,
-        kandidatLain.length > 0 ? kandidatLain : advokatList,
-        otherItems
-      );
-      const namaAdv = advokatList.find((a) => a.id === advokatBaruId)?.nama || 'Advokat Cadangan';
-      tampilkanPesan(`Penugasan "${target.perkara}" dialihkan ke ${namaAdv}.`);
-      return prev.map((i) =>
-        i.id === itemId
-          ? { ...i, advokatId: advokatBaruId, assignedAutomatically: true }
-          : i
-      );
-    });
+  const handleAutoReassignConflict = async (itemId: string) => {
+    const target = items.find((i) => i.id === itemId);
+    if (!target) return;
+    const otherItems = items.filter((i) => i.id !== itemId);
+    const kandidatLain = advokatList.filter(
+      (a) => a.aktif && a.id !== target.advokatId
+    );
+    const advokatBaruId = pilihAdvokatOtomatis(
+      `${target.lokasi} ${target.perkara}`,
+      target.kategori,
+      target.hari,
+      target.waktuMulai,
+      kandidatLain.length > 0 ? kandidatLain : advokatList,
+      otherItems
+    );
+    const updatedItem: ItemDisposisi = {
+      ...target,
+      advokatId: advokatBaruId,
+      assignedAutomatically: true,
+    };
+    const namaAdv = advokatList.find((a) => a.id === advokatBaruId)?.nama || 'Advokat Cadangan';
+    setItems((prev) => prev.map((i) => (i.id === itemId ? updatedItem : i)));
+    if (currentUser) {
+      await updateDisposisiItemInCloud(updatedItem, currentUser.uid);
+    }
+    tampilkanPesan(`Penugasan "${target.perkara}" dialihkan ke ${namaAdv}.`);
   };
 
   const handleExportCSV = () => {
@@ -387,8 +592,12 @@ export default function App() {
         lines.push(
           `${idx + 1}. *${item.waktuMulai}–${item.waktuSelesai} WIB* | *${item.lokasi}*`
         );
-        lines.push(`   Perkara: ${item.perkara}${item.nomorPerkara !== '-' ? ` (${item.nomorPerkara})` : ''}`);
-        lines.push(`   PIC: ${pic?.nama || '-'}${item.prioritas === 'Tinggi' ? ' [PRIORITAS TINGGI]' : ''}`);
+        lines.push(
+          `   Perkara: ${item.perkara}${item.nomorPerkara !== '-' ? ` (${item.nomorPerkara})` : ''}`
+        );
+        lines.push(
+          `   PIC: ${pic?.nama || '-'}${item.prioritas === 'Tinggi' ? ' [PRIORITAS TINGGI]' : ''}`
+        );
         if (pendampingNames.length > 0) {
           lines.push(`   Pendamping: ${pendampingNames.join(', ')}`);
         }
@@ -419,6 +628,110 @@ export default function App() {
       window.print();
     }
   };
+
+  // Tampilan Memuat Sesi Autentikasi
+  if (!authReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-amber-50/40 p-6">
+        <div className="bg-white border border-amber-200 rounded-lg p-8 max-w-md w-full text-center space-y-3">
+          <Loader2 className="w-7 h-7 animate-spin text-amber-700 mx-auto" />
+          <p className="text-sm font-semibold text-slate-900">
+            Menyiapkan Sistem Disposisi Ryan Gumay Law Firm...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Gerbang Masuk Pengguna (Agar Seluruh Perubahan Tersinkronisasi Antar Pengguna)
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen flex flex-col justify-between bg-amber-50/40 text-slate-900">
+        <header className="bg-white border-b-2 border-yellow-400 px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3 font-display text-xl font-bold tracking-tight text-slate-950">
+            <img
+              src="/assets/aistudio/logo_rg_f_775b191a.png"
+              alt="Logo Ryan Gumay Law Firm"
+              referrerPolicy="no-referrer"
+              className="w-10 h-10 object-contain shrink-0"
+            />
+            <span>Ryan Gumay Law Firm</span>
+          </div>
+          <span className="text-xs font-semibold text-amber-900">
+            Sistem Disposisi & Penugasan Mingguan Tim Advokat
+          </span>
+        </header>
+
+        <main className="flex-1 flex items-center justify-center px-6 py-12">
+          <div className="bg-white border border-amber-300 rounded-lg p-8 max-w-lg w-full space-y-6 shadow-xs">
+            <div className="flex items-center gap-4 border-b border-amber-200 pb-5">
+              <div className="w-16 h-16 rounded-lg bg-amber-50 border border-amber-200 p-1.5 shrink-0 flex items-center justify-center">
+                <img
+                  src="/assets/aistudio/logo_rg_f_775b191a.png"
+                  alt="Logo Resmi Ryan Gumay Law Firm"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-contain"
+                />
+              </div>
+              <div>
+                <h1 className="font-display text-xl font-bold text-slate-950">
+                  RYAN GUMAY LAW FIRM
+                </h1>
+                <p className="text-xs font-semibold text-amber-800 mt-0.5">
+                  Portal Sinkronisasi Disposisi & Jadwal Sidang Terpusat
+                </p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Palembang · Sumatera Selatan
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 text-xs text-slate-700 leading-relaxed">
+              <p>
+                Seluruh jadwal persidangan, penugasan Advokat Penanggung Jawab (PIC),{' '}
+                <strong>Advokat Pendamping</strong>, dan dokumen <strong>Lembar Disposisi</strong>{' '}
+                kini disimpan secara terpusat di cloud dan tersinkronisasi otomatis secara
+                real-time untuk semua pengguna.
+              </p>
+              <p>
+                Silakan masuk menggunakan akun Google Anda untuk mengakses dan memperbarui
+                jadwal bersama tim.
+              </p>
+            </div>
+
+            {authError && (
+              <div className="p-3 rounded-md bg-red-50 border border-red-200 text-xs text-red-800">
+                {authError}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={handleLogin}
+              disabled={isLoggingIn}
+              className="w-full inline-flex items-center justify-center gap-2 py-2.5 px-4 text-xs font-bold text-slate-950 bg-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 disabled:opacity-60 transition-colors"
+            >
+              {isLoggingIn ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Menghubungkan Akun...</span>
+                </>
+              ) : (
+                <>
+                  <LogIn className="w-4 h-4" />
+                  <span>Masuk dengan Akun Google</span>
+                </>
+              )}
+            </button>
+          </div>
+        </main>
+
+        <footer className="border-t border-amber-200 bg-amber-50/70 px-6 py-4 text-center text-xs text-amber-950/80">
+          Ryan Gumay Law Firm · Penyimpanan Cloud Terpusat & Sinkronisasi Multi-Pengguna
+        </footer>
+      </div>
+    );
+  }
 
   // Ringkasan Statistik Mingguan untuk KPI Bar
   const totalSidangPengadilan = items.filter((i) => i.kategori === 'Sidang Pengadilan').length;
@@ -495,8 +808,8 @@ export default function App() {
           </button>
         </nav>
 
-        {/* Zone 3: 1 primary action button */}
-        <div className="flex items-center shrink-0">
+        {/* Zone 3: Primary action & user session */}
+        <div className="flex items-center gap-2.5 shrink-0">
           <button
             type="button"
             onClick={handlePrintLangsung}
@@ -504,6 +817,15 @@ export default function App() {
           >
             <Printer className="w-3.5 h-3.5" />
             <span>Cetak Lembar Disposisi</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            title={`Keluar (${currentUser.email || 'Pengguna'})`}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-amber-50 border border-amber-300 rounded-lg hover:bg-amber-100 transition-colors whitespace-nowrap shrink-0"
+          >
+            <LogOut className="w-3.5 h-3.5 text-amber-800" />
+            <span className="hidden sm:inline">Keluar</span>
           </button>
         </div>
       </header>
@@ -513,10 +835,14 @@ export default function App() {
         <div className="max-w-7xl mx-auto space-y-5">
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2 text-xs text-amber-900 font-semibold">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-amber-900 font-semibold">
                 <span>Sistem Internal Kepala Kantor</span>
                 <span aria-hidden="true">·</span>
-                <span>Mandiri & Tersimpan Lokal di Perangkat</span>
+                <span>
+                  {cloudReady
+                    ? `Tersinkronisasi Cloud (${currentUser.email})`
+                    : 'Menyinkronkan Data...'}
+                </span>
                 <span aria-hidden="true">·</span>
                 <span className="font-mono-tabular">No. {metadata.nomorDokumen}</span>
               </div>
@@ -632,22 +958,34 @@ export default function App() {
             <PanelImporData
               mondayISO={metadata.tanggalMulaiMinggu}
               advokatList={advokatList}
-              onImportSuccess={(importedItems, formattedLines, mode, sumberLabel) => {
+              onImportSuccess={async (importedItems, formattedLines, mode, sumberLabel) => {
                 if (mode === 'replace') {
+                  const nextCatatan = formattedLines.join('\n');
                   setItems(importedItems);
-                  setCatatanMentah(formattedLines.join('\n'));
+                  setCatatanMentah(nextCatatan);
+                  await replaceAllDisposisiItemsInCloud(
+                    importedItems,
+                    nextCatatan,
+                    metadata,
+                    currentUser.uid
+                  );
                   tampilkanPesan(
-                    `${importedItems.length} agenda dari ${sumberLabel} berhasil menggantikan jadwal minggu ini.`
+                    `${importedItems.length} agenda dari ${sumberLabel} berhasil menggantikan jadwal & disinkronkan.`
                   );
                 } else {
+                  const nextCatatan = catatanMentah.trim()
+                    ? `${catatanMentah.trim()}\n${formattedLines.join('\n')}`
+                    : formattedLines.join('\n');
                   setItems((prev) => [...prev, ...importedItems]);
-                  setCatatanMentah((prev) =>
-                    prev.trim()
-                      ? `${prev.trim()}\n${formattedLines.join('\n')}`
-                      : formattedLines.join('\n')
+                  setCatatanMentah(nextCatatan);
+                  await appendDisposisiItemsInCloud(
+                    importedItems,
+                    nextCatatan,
+                    metadata,
+                    currentUser.uid
                   );
                   tampilkanPesan(
-                    `${importedItems.length} agenda dari ${sumberLabel} berhasil ditambahkan ke jadwal aktif.`
+                    `${importedItems.length} agenda dari ${sumberLabel} berhasil ditambahkan & disinkronkan.`
                   );
                 }
               }}
@@ -668,8 +1006,10 @@ export default function App() {
                     </h2>
                     <p className="text-xs text-slate-600 mt-0.5">
                       Ketik atau tempel daftar agenda rapat mingguan. Pisahkan dengan tanda{' '}
-                      <code className="font-mono bg-amber-100 text-amber-950 px-1 py-0.5 rounded">|</code> atau
-                      tulis dalam kalimat bebas per baris.
+                      <code className="font-mono bg-amber-100 text-amber-950 px-1 py-0.5 rounded">
+                        |
+                      </code>{' '}
+                      atau tulis dalam kalimat bebas per baris.
                     </p>
                   </div>
                   <button
@@ -770,8 +1110,8 @@ export default function App() {
                   <textarea
                     rows={14}
                     value={catatanMentah}
-                    onChange={(e) => setCatatanMentah(e.target.value)}
-                    placeholder="Contoh: Senin 09:00 | PN Jakarta Selatan | Sidang Gugatan Wanprestasi PT Maju Jaya | Hendra | Siapkan bukti surat..."
+                    onChange={(e) => handleUbahCatatanMentah(e.target.value)}
+                    placeholder="Contoh: Senin 09:00 | PN Palembang | Sidang Gugatan Wanprestasi PT Maju Jaya | Iqbal | Siapkan bukti surat..."
                     className="w-full p-3.5 text-xs font-mono-tabular leading-relaxed bg-amber-50/40 border border-amber-300 rounded-lg text-slate-900 focus:bg-white focus:outline-none focus:ring-2 focus:ring-yellow-500"
                   />
                   <div className="flex flex-wrap items-center justify-between text-xs text-slate-500 mt-1.5 gap-2">
@@ -782,7 +1122,7 @@ export default function App() {
                     </span>
                     <button
                       type="button"
-                      onClick={() => setCatatanMentah('')}
+                      onClick={() => handleUbahCatatanMentah('')}
                       className="text-slate-500 hover:text-red-700 font-medium"
                     >
                       Bersihkan Catatan
@@ -837,8 +1177,8 @@ export default function App() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      handleKonversiGanti();
+                    onClick={async () => {
+                      await handleKonversiGanti();
                       setActiveTab('lembar');
                     }}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-slate-950 bg-yellow-400 hover:bg-yellow-500 border border-yellow-500 rounded-md transition-colors whitespace-nowrap shrink-0"
@@ -1005,16 +1345,19 @@ export default function App() {
             advokatList={advokatList}
             mondayISO={metadata.tanggalMulaiMinggu}
             konflikList={konflikJadwal}
-            onUpdateItem={(updated) =>
-              setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
-            }
-            onDeleteItem={(id) => {
-              setItems((prev) => prev.filter((i) => i.id !== id));
-              tampilkanPesan('Baris agenda dihapus dari jadwal.');
+            onUpdateItem={async (updated) => {
+              setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+              await updateDisposisiItemInCloud(updated, currentUser.uid);
             }}
-            onAddItem={(newItem) => {
+            onDeleteItem={async (id) => {
+              setItems((prev) => prev.filter((i) => i.id !== id));
+              await deleteDisposisiItemInCloud(id);
+              tampilkanPesan('Baris agenda dihapus dari jadwal bersama.');
+            }}
+            onAddItem={async (newItem) => {
               setItems((prev) => [...prev, newItem]);
-              tampilkanPesan(`Agenda "${newItem.perkara}" berhasil ditambahkan.`);
+              await createDisposisiItemInCloud(newItem, currentUser.uid);
+              tampilkanPesan(`Agenda "${newItem.perkara}" berhasil ditambahkan & disinkronkan.`);
             }}
             onAutoReassignConflict={handleAutoReassignConflict}
           />
@@ -1044,17 +1387,20 @@ export default function App() {
           <ManajemenTimAdvokat
             advokatList={advokatList}
             items={items}
-            onAddAdvokat={(baru) => {
+            onAddAdvokat={async (baru) => {
               setAdvokatList((prev) => [...prev, baru]);
-              tampilkanPesan(`Advokat ${baru.nama} berhasil ditambahkan ke tim.`);
+              await createAdvokatInCloud(baru, currentUser.uid);
+              tampilkanPesan(`Advokat ${baru.nama} berhasil ditambahkan & disinkronkan.`);
             }}
-            onUpdateAdvokat={(updated) => {
+            onUpdateAdvokat={async (updated) => {
               setAdvokatList((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
-              tampilkanPesan(`Data personel ${updated.nama} berhasil diperbarui.`);
+              await updateAdvokatInCloud(updated, currentUser.uid);
+              tampilkanPesan(`Data personel ${updated.nama} berhasil diperbarui & disinkronkan.`);
             }}
-            onDeleteAdvokat={(id) => {
+            onDeleteAdvokat={async (id) => {
               setAdvokatList((prev) => prev.filter((a) => a.id !== id));
-              tampilkanPesan('Data advokat dihapus dari daftar.');
+              await deleteAdvokatInCloud(id);
+              tampilkanPesan('Data advokat dihapus dari database bersama.');
             }}
             onCopyWhatsAppPerAdvokat={(advId) => handleCopyWhatsApp(advId)}
             copiedKey={copiedKey}
@@ -1077,7 +1423,7 @@ export default function App() {
             </span>
           </div>
           <div>
-            Aplikasi Mandiri (Standalone) · Seluruh data disimpan secara lokal pada peramban Anda
+            Penyimpanan Cloud Terpusat · Data tersinkronisasi secara real-time untuk seluruh pengguna
           </div>
         </div>
       </footer>
